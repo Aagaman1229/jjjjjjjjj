@@ -5,12 +5,10 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn(
-    'Supabase credentials missing. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env'
+  throw new Error(
+    'Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY in .env. ' +
+    'Your friend needs to create a .env file with these values.'
   )
 }
 
-export const supabase = createClient<Database>(
-  supabaseUrl || 'http://localhost:54321',
-  supabaseAnonKey || 'public-anon-key'
-)
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey)

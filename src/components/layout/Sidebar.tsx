@@ -1,38 +1,18 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import {
-  BookOpen,
-  BookText,
-  GraduationCap,
-  SpellCheck,
-  Layers,
-  BarChart3,
-  ChevronDown,
-  ChevronRight,
-  X,
-} from 'lucide-react'
+import { ChevronDown, ChevronRight, X, BookOpen } from 'lucide-react'
 import { curriculum } from '../../data/curriculum'
 
 const categories = [
-  { id: 'quant', label: 'Quantitative Reasoning', icon: '📐', color: '#1a73e8' },
-  { id: 'verbal', label: 'Verbal Reasoning', icon: '📖', color: '#34a853' },
-  { id: 'writing', label: 'Analytical Writing', icon: '✍️', color: '#ea4335' },
+  { id: 'quant', label: 'Quantitative Reasoning', icon: '📐' },
+  { id: 'verbal', label: 'Verbal Reasoning', icon: '📖' },
+  { id: 'writing', label: 'Analytical Writing', icon: '✍️' },
 ]
 
 interface SidebarProps {
   isOpen: boolean
   onClose: () => void
 }
-
-const navItems = [
-  { path: '/', label: 'Dashboard', icon: BarChart3 },
-  { path: '/learn', label: 'Learn', icon: BookOpen },
-  { path: '/vocabulary', label: 'Vocabulary', icon: SpellCheck },
-  { path: '/flashcards', label: 'Flashcards', icon: Layers },
-  { path: '/practice', label: 'Practice', icon: BookText },
-  { path: '/mock-test', label: 'Mock Test', icon: GraduationCap },
-  { path: '/analytics', label: 'Analytics', icon: BarChart3 },
-]
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const navigate = useNavigate()
@@ -86,8 +66,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <GraduationCap size={22} color="var(--primary)" />
-            <span style={{ fontWeight: 700, fontSize: 16 }}>GRE Prep</span>
+            <BookOpen size={20} color="var(--primary)" />
+            <span style={{ fontWeight: 700, fontSize: 16 }}>Topics</span>
           </div>
           <button
             onClick={onClose}
@@ -103,53 +83,20 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           </button>
         </div>
 
-        <nav style={{ padding: '12px 0' }}>
-          {navItems.map(item => {
-            const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path))
-            const Icon = item.icon
-            return (
-              <div
-                key={item.path}
-                onClick={() => { navigate(item.path); onClose() }}
-                style={{
-                  padding: '10px 20px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  color: isActive ? 'var(--primary)' : 'var(--text)',
-                  background: isActive ? 'var(--primary-light)' : 'transparent',
-                  borderRight: isActive ? '3px solid var(--primary)' : '3px solid transparent',
-                  fontWeight: isActive ? 600 : 400,
-                  transition: 'all var(--transition)',
-                }}
-                onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--bg-secondary)' }}
-                onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
-              >
-                <Icon size={18} />
-                {item.label}
-              </div>
-            )
-          })}
-        </nav>
-
-        <div style={{ padding: '8px 20px 4px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>
-          Topics
-        </div>
-        <nav style={{ padding: '4px 0' }}>
+        <nav style={{ padding: '8px 0' }}>
           {categories.map(cat => (
             <div key={cat.id}>
               <div
                 onClick={() => toggleTopic(cat.id)}
                 style={{
-                  padding: '8px 20px',
+                  padding: '10px 20px',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
                   fontSize: 13,
                   color: 'var(--text-secondary)',
-                  fontWeight: 500,
+                  fontWeight: 600,
                 }}
               >
                 <span>{cat.icon}</span>
@@ -164,11 +111,12 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                       key={topic.id}
                       onClick={() => { navigate(`/learn/${topic.id}`); onClose() }}
                       style={{
-                        padding: '6px 20px 6px 48px',
+                        padding: '8px 20px 8px 48px',
                         cursor: 'pointer',
                         fontSize: 13,
                         color: location.pathname.includes(topic.id) ? 'var(--primary)' : 'var(--text)',
                         background: location.pathname.includes(topic.id) ? 'var(--primary-light)' : 'transparent',
+                        fontWeight: location.pathname.includes(topic.id) ? 600 : 400,
                         transition: 'all var(--transition)',
                       }}
                       onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-secondary)' }}
