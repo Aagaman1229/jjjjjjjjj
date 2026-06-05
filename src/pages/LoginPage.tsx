@@ -31,7 +31,7 @@ export function LoginPage() {
         setError('Check your email for the confirmation link.')
       }
     } catch {
-      setError('Something went wrong. Please try again.')
+      setError('Network error — check your internet connection or the Supabase URL in .env')
     } finally {
       setLoading(false)
     }
