@@ -1,9 +1,10 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, CheckCircle, AlertTriangle, Zap, Beaker } from 'lucide-react'
-import { curriculum, getTopicById } from '../../data/curriculum'
+import { ArrowLeft, CheckCircle, AlertTriangle, Zap, Beaker, BookOpen, ListChecks, Lightbulb, Target, Type, CheckSquare, Square, Eye, EyeOff } from 'lucide-react'
+import { getTopicById } from '../../data/curriculum'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { useLocalStorage } from '../../hooks/useLocalStorage'
 
 export function LessonView() {
   const { topicId, lessonId } = useParams()
@@ -12,290 +13,336 @@ export function LessonView() {
   const [activeLesson, setActiveLesson] = useState(lessonId || topic?.lessons?.[0]?.id || '')
 
   const lesson = topic?.lessons?.find(l => l.id === activeLesson)
+  const activeLessonIndex = topic?.lessons?.findIndex(l => l.id === activeLesson) ?? 0
+
+  const [fontFamily, setFontFamily] = useLocalStorage<'sans' | 'serif'>('gre-reading-font-family', 'sans')
+  const [fontSize, setFontSize] = useLocalStorage<number>('gre-reading-font-size', 16)
+  const [checkedGoals, setCheckedGoals] = useLocalStorage<Record<string, boolean>>('gre-lesson-checked-goals', {})
+  const [activeTab, setActiveTab] = useState('guide')
+  const [revealedExamples, setRevealedExamples] = useState<Record<string, Record<number, boolean>>>({})
+
+  const availableTabs: string[] = []
+  if (lesson) {
+    availableTabs.push('guide')
+    if (lesson.formulas && lesson.formulas.length > 0) availableTabs.push('formulas')
+    if (lesson.solvedExamples && lesson.solvedExamples.length > 0) availableTabs.push('examples')
+  }
+
+  const currentTab = availableTabs.includes(activeTab) ? activeTab : 'guide'
+
+  const toggleReveal = (index: number) => {
+    setRevealedExamples(prev => ({
+      ...prev,
+      [activeLesson]: {
+        ...(prev[activeLesson] || {}),
+        [index]: !prev[activeLesson]?.[index]
+      }
+    }))
+  }
+
+  const isGoalChecked = (index: number) => !!checkedGoals[`${lesson?.id}-obj-${index}`]
+  const toggleGoal = (index: number) => {
+    setCheckedGoals(prev => ({
+      ...prev,
+      [`${lesson?.id}-obj-${index}`]: !prev[`${lesson?.id}-obj-${index}`]
+    }))
+  }
 
   if (!topic) {
     return (
-      <div style={{ textAlign: 'center', padding: 60 }}>
+      <div className="learn-empty-state">
         <h2>Topic not found</h2>
-        <button onClick={() => navigate('/learn')} style={{ marginTop: 16, padding: '8px 20px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius)' }}>
-          Back to topics
-        </button>
+        <button onClick={() => navigate('/learn')}>Back to topics</button>
       </div>
     )
   }
 
-  const sectionStyle: React.CSSProperties = {
-    background: 'var(--bg-card)',
-    border: '1px solid var(--border)',
-    borderRadius: 'var(--radius-lg)',
-    padding: 24,
-    marginBottom: 20,
-  }
-
-  const badgeStyle: React.CSSProperties = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 6,
-    padding: '4px 12px',
-    borderRadius: 20,
-    fontSize: 12,
-    fontWeight: 600,
-  }
-
   return (
-    <div>
-      <button
-        onClick={() => navigate('/learn')}
-        style={{
-          background: 'none',
-          border: 'none',
-          color: 'var(--primary)',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: 0,
-          marginBottom: 16,
-          fontSize: 14,
-        }}
-      >
+    <div className="lesson-page">
+      <button onClick={() => navigate('/learn')} className="lesson-back-btn">
         <ArrowLeft size={16} /> Back to topics
       </button>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
-        <span style={{ fontSize: 28 }}>{topic.icon}</span>
+      <section className="lesson-hero">
+        <div className="lesson-hero-icon">{topic.icon}</div>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700 }}>{topic.title}</h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{topic.description}</p>
+          <div className="vocab-kicker">Focused lesson</div>
+          <h1>{topic.title}</h1>
+          <p>{topic.description}</p>
         </div>
-      </div>
+        <div className="lesson-hero-chip">
+          <BookOpen size={16} /> {topic.lessons?.length || 0} lessons
+        </div>
+      </section>
 
-      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 200 }}>
-          <div style={{
-            ...sectionStyle,
-            padding: 12,
-          }}>
-            <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
-              Lessons
-            </h3>
-            {topic.lessons?.map(l => (
-              <div
+      <div className="lesson-layout">
+        <aside className="lesson-sidebar">
+          <div className="lesson-sidebar-card">
+            <div className="lesson-sidebar-title">
+              <ListChecks size={16} /> Lessons
+            </div>
+            {topic.lessons?.map((l, index) => (
+              <button
                 key={l.id}
                 onClick={() => setActiveLesson(l.id)}
-                style={{
-                  padding: '8px 12px',
-                  borderRadius: 'var(--radius)',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  background: activeLesson === l.id ? 'var(--primary-light)' : 'transparent',
-                  color: activeLesson === l.id ? 'var(--primary)' : 'var(--text)',
-                  fontWeight: activeLesson === l.id ? 600 : 400,
-                  marginBottom: 2,
-                  transition: 'all var(--transition)',
-                }}
+                className={`lesson-nav-item ${activeLesson === l.id ? 'active' : ''}`}
               >
-                {l.title}
-              </div>
+                <span>{index + 1}</span>
+                <strong>{l.title}</strong>
+              </button>
             ))}
           </div>
-        </div>
+        </aside>
 
-        <div style={{ flex: 3, minWidth: 0 }}>
+        <main className="lesson-main">
           {lesson && (
             <>
-              <div style={sectionStyle}>
-                <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 12 }}>
-                  {lesson.title}
-                </h2>
-
-                {lesson.objectives && (
-                  <div style={{ marginBottom: 20 }}>
-                    <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                      Learning Objectives
-                    </h3>
-                    <ul style={{ paddingLeft: 20, fontSize: 14, lineHeight: 1.8 }}>
-                      {lesson.objectives.map((obj, i) => (
-                        <li key={i} style={{ color: 'var(--text-secondary)' }}>{obj}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-
-                <div className="lesson-markdown">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {lesson.content}
-                  </ReactMarkdown>
+              {/* Tab Bar Navigation */}
+              <div className="lesson-tabs-container">
+                <div className="lesson-tab-bar">
+                  {availableTabs.map(tab => (
+                    <button
+                      key={tab}
+                      onClick={() => setActiveTab(tab)}
+                      className={`lesson-tab-btn ${currentTab === tab ? 'active' : ''}`}
+                    >
+                      {tab === 'guide' && <BookOpen size={16} />}
+                      {tab === 'formulas' && <Beaker size={16} />}
+                      {tab === 'examples' && <Zap size={16} />}
+                      <span>{tab.charAt(0).toUpperCase() + tab.slice(1)}</span>
+                    </button>
+                  ))}
                 </div>
-
-                {lesson.explanation && (
-                  <div style={{
-                    marginTop: 20,
-                    padding: 16,
-                    background: 'var(--primary-light)',
-                    borderRadius: 'var(--radius)',
-                    fontSize: 14,
-                    lineHeight: 1.6,
-                    border: '1px solid var(--border-light)',
-                  }}>
-                    <strong>Key Explanation:</strong>
-                    <div style={{ marginTop: 8 }}>{lesson.explanation}</div>
-                  </div>
-                )}
               </div>
 
-              {lesson.keyIdeas && lesson.keyIdeas.length > 0 && (
-                <div style={sectionStyle}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                    <CheckCircle size={18} color="var(--secondary)" />
-                    <h3 style={{ fontSize: 16, fontWeight: 600 }}>Key Ideas</h3>
-                  </div>
-                  <ul style={{ paddingLeft: 20, fontSize: 14, lineHeight: 2 }}>
-                    {lesson.keyIdeas.map((idea, i) => (
-                      <li key={i}>{idea}</li>
-                    ))}
-                  </ul>
+              {/* Tab: Guide */}
+              {currentTab === 'guide' && (
+                <div className="lesson-tab-content active">
+                  <section className="lesson-reading-card featured">
+                    <div className="lesson-header-row">
+                      <div className="lesson-number">Lesson {activeLessonIndex + 1}</div>
+                      
+                      {/* Reading Settings Toolbar */}
+                      <div className="reading-toolbar">
+                        <button
+                          onClick={() => setFontFamily(prev => prev === 'sans' ? 'serif' : 'sans')}
+                          className="toolbar-btn"
+                          title="Toggle Font Family"
+                        >
+                          <Type size={15} />
+                          <span>{fontFamily === 'sans' ? 'Serif' : 'Sans'}</span>
+                        </button>
+                        <div className="toolbar-divider"></div>
+                        <button
+                          onClick={() => setFontSize(prev => Math.max(14, prev - 2))}
+                          className="toolbar-btn"
+                          disabled={fontSize <= 14}
+                          title="Decrease Font Size"
+                        >
+                          A-
+                        </button>
+                        <span className="font-size-indicator">{fontSize}px</span>
+                        <button
+                          onClick={() => setFontSize(prev => Math.min(22, prev + 2))}
+                          className="toolbar-btn"
+                          disabled={fontSize >= 22}
+                          title="Increase Font Size"
+                        >
+                          A+
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <h2>{lesson.title}</h2>
+
+                    {/* Goals Checklist */}
+                    {lesson.objectives && lesson.objectives.length > 0 && (
+                      <div className="lesson-objectives">
+                        <div className="lesson-section-heading compact">
+                          <Target size={16} /> Learning Goals (Click to check off)
+                        </div>
+                        <div className="lesson-objective-grid">
+                          {lesson.objectives.map((obj, i) => {
+                            const checked = isGoalChecked(i)
+                            return (
+                              <button
+                                key={i}
+                                onClick={() => toggleGoal(i)}
+                                className={`lesson-objective-item interactive-goal ${checked ? 'checked' : ''}`}
+                              >
+                                {checked ? (
+                                  <CheckSquare size={16} className="goal-checkbox-icon checked" />
+                                ) : (
+                                  <Square size={16} className="goal-checkbox-icon" />
+                                )}
+                                <span>{obj}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    <div
+                      className={`lesson-markdown lesson-markdown-pretty font-${fontFamily}`}
+                      style={{ fontSize: `${fontSize}px` }}
+                    >
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{lesson.content}</ReactMarkdown>
+                    </div>
+
+                    {lesson.explanation && (
+                      <div className="lesson-callout blue">
+                        <Lightbulb size={18} />
+                        <div>
+                          <strong>Key explanation</strong>
+                          <p>{lesson.explanation}</p>
+                        </div>
+                      </div>
+                    )}
+                  </section>
+
+                  {lesson.keyIdeas && lesson.keyIdeas.length > 0 && (
+                    <section className="lesson-reading-card">
+                      <div className="lesson-section-heading">
+                        <CheckCircle size={19} /> Key Ideas
+                      </div>
+                      <div className="lesson-idea-list">
+                        {lesson.keyIdeas.map((idea, i) => (
+                          <div key={i} className="lesson-idea-item">
+                            <span>{i + 1}</span>
+                            <p>{idea}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {lesson.commonMistakes && lesson.commonMistakes.length > 0 && (
+                    <section className="lesson-reading-card">
+                      <div className="lesson-section-heading">
+                        <AlertTriangle size={19} /> Common Mistakes
+                      </div>
+                      <div className="lesson-warning-list">
+                        {lesson.commonMistakes.map((cm, i) => (
+                          <div key={i} className="lesson-warning-card">
+                            <strong>{cm.mistake}</strong>
+                            <span>{cm.correction}</span>
+                            <p>{cm.explanation}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
+
+                  {lesson.shortcuts && lesson.shortcuts.length > 0 && (
+                    <section className="lesson-reading-card">
+                      <div className="lesson-section-heading">
+                        <Zap size={19} /> Shortcuts & Tips
+                      </div>
+                      <div className="lesson-tip-list">
+                        {lesson.shortcuts.map((sc, i) => (
+                          <div key={i} className="lesson-tip-card">
+                            <strong>{sc.technique}</strong>
+                            <p>{sc.description}</p>
+                            <span>{sc.example}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
                 </div>
               )}
 
-              {lesson.formulas && lesson.formulas.length > 0 && (
-                <div style={sectionStyle}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                    <Beaker size={18} color="var(--primary)" />
-                    <h3 style={{ fontSize: 16, fontWeight: 600 }}>Formulas</h3>
-                  </div>
-                  {lesson.formulas.map((f, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        padding: 16,
-                        background: 'var(--bg-secondary)',
-                        borderRadius: 'var(--radius)',
-                        marginBottom: 12,
-                        border: '1px solid var(--border-light)',
-                      }}
-                    >
-                      <div style={{ fontWeight: 600, marginBottom: 4 }}>{f.name}</div>
-                      <div style={{
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: 18,
-                        padding: '8px 12px',
-                        background: 'var(--bg-card)',
-                        borderRadius: 4,
-                        marginBottom: 8,
-                        textAlign: 'center',
-                        color: 'var(--primary)',
-                      }}>
-                        {f.formula}
-                      </div>
-                      <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>{f.explanation}</div>
-                      <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Usage: {f.usage}</div>
+              {/* Tab: Formulas */}
+              {currentTab === 'formulas' && lesson.formulas && (
+                <div className="lesson-tab-content active">
+                  <section className="lesson-reading-card">
+                    <div className="lesson-section-heading">
+                      <Beaker size={19} /> Formulas & Rules
                     </div>
-                  ))}
+                    <div className="lesson-formula-grid">
+                      {lesson.formulas.map((f, i) => (
+                        <div key={i} className="lesson-formula-card">
+                          <h4>{f.name}</h4>
+                          <div className="lesson-formula-text">{f.formula}</div>
+                          <p>{f.explanation}</p>
+                          <span className="formula-usage-tag">Usage: {f.usage}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
                 </div>
               )}
 
-              {lesson.solvedExamples && lesson.solvedExamples.length > 0 && (
-                <div style={sectionStyle}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-                    <Zap size={18} color="var(--warning)" />
-                    <h3 style={{ fontSize: 16, fontWeight: 600 }}>Solved Examples</h3>
-                  </div>
-                  {lesson.solvedExamples.map((ex, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        padding: 16,
-                        background: 'var(--bg-secondary)',
-                        borderRadius: 'var(--radius)',
-                        marginBottom: 12,
-                      }}
-                    >
-                      <div style={{ fontWeight: 600, marginBottom: 8 }}>Example {i + 1}</div>
-                      <div style={{ fontSize: 14, marginBottom: 8, color: 'var(--text)' }}>
-                        <strong>Problem: </strong>{ex.problem}
-                      </div>
-                      <div style={{ fontSize: 13, marginBottom: 8, color: 'var(--text-secondary)' }}>
-                        <strong>Steps:</strong>
-                        <ol style={{ paddingLeft: 20, marginTop: 4, lineHeight: 1.8 }}>
-                          {ex.steps.map((step, j) => (
-                            <li key={j}>{step}</li>
-                          ))}
-                        </ol>
-                      </div>
-                      <div style={{ fontSize: 14, color: 'var(--secondary)', fontWeight: 600 }}>
-                        Answer: {ex.answer}
-                      </div>
-                      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
-                        {ex.solution}
-                      </div>
+              {/* Tab: Solved Examples */}
+              {currentTab === 'examples' && lesson.solvedExamples && (
+                <div className="lesson-tab-content active">
+                  <section className="lesson-reading-card">
+                    <div className="lesson-section-heading">
+                      <Zap size={19} /> Active Recall Solved Examples
                     </div>
-                  ))}
-                </div>
-              )}
+                    <p className="tab-intro-text">
+                      Try to solve each problem on your own before revealing the solution and step-by-step breakdown.
+                    </p>
+                    <div className="lesson-example-list">
+                      {lesson.solvedExamples.map((ex, i) => {
+                        const isRevealed = !!revealedExamples[activeLesson]?.[i]
+                        return (
+                          <div
+                            key={i}
+                            className={`lesson-example-card active-recall-card ${
+                              isRevealed ? 'solution-revealed' : 'solution-hidden'
+                            }`}
+                          >
+                            <div className="lesson-example-header">
+                              <div className="lesson-example-title">Example {i + 1}</div>
+                              <button
+                                className={`reveal-solution-btn ${isRevealed ? 'revealed' : ''}`}
+                                onClick={() => toggleReveal(i)}
+                              >
+                                {isRevealed ? (
+                                  <>
+                                    <EyeOff size={15} /> Hide Solution
+                                  </>
+                                ) : (
+                                  <>
+                                    <Eye size={15} /> Reveal Solution
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            
+                            <p className="example-problem-text">
+                              <strong>Problem:</strong> {ex.problem}
+                            </p>
 
-              {lesson.commonMistakes && lesson.commonMistakes.length > 0 && (
-                <div style={sectionStyle}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                    <AlertTriangle size={18} color="var(--accent)" />
-                    <h3 style={{ fontSize: 16, fontWeight: 600 }}>Common Mistakes</h3>
-                  </div>
-                  {lesson.commonMistakes.map((cm, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        padding: 12,
-                        background: '#fef2f2',
-                        borderRadius: 'var(--radius)',
-                        marginBottom: 8,
-                        border: '1px solid #fecaca',
-                      }}
-                    >
-                      <div style={{ fontSize: 13, color: '#dc2626' }}>
-                        <strong>❌ {cm.mistake}</strong>
-                      </div>
-                      <div style={{ fontSize: 13, color: '#16a34a', marginTop: 4 }}>
-                        <strong>✅ {cm.correction}</strong>
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
-                        {cm.explanation}
-                      </div>
+                            <div className="example-solution-accordion">
+                              <div className="lesson-steps">
+                                <strong>Step-by-Step Breakdown:</strong>
+                                <ol>
+                                  {ex.steps.map((step, j) => (
+                                    <li key={j}>{step}</li>
+                                  ))}
+                                </ol>
+                              </div>
+                              <div className="lesson-answer">
+                                <strong>Answer:</strong> {ex.answer}
+                              </div>
+                              <div className="lesson-solution-explanation">
+                                <strong>Full Explanation:</strong>
+                                <p>{ex.solution}</p>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
-                  ))}
-                </div>
-              )}
-
-              {lesson.shortcuts && lesson.shortcuts.length > 0 && (
-                <div style={sectionStyle}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                    <Zap size={18} color="var(--warning)" />
-                    <h3 style={{ fontSize: 16, fontWeight: 600 }}>Shortcuts & Tips</h3>
-                  </div>
-                  {lesson.shortcuts.map((sc, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        padding: 12,
-                        background: '#fffbeb',
-                        borderRadius: 'var(--radius)',
-                        marginBottom: 8,
-                        border: '1px solid #fde68a',
-                      }}
-                    >
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>⚡ {sc.technique}</div>
-                      <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4 }}>
-                        {sc.description}
-                      </div>
-                      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
-                        {sc.example}
-                      </div>
-                    </div>
-                  ))}
+                  </section>
                 </div>
               )}
             </>
           )}
-        </div>
+        </main>
       </div>
     </div>
   )

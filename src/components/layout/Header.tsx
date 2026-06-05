@@ -30,39 +30,16 @@ export function Header({ openTopics, title }: HeaderProps) {
   }
 
   return (
-    <header
-      style={{
-        height: 'var(--header-height)',
-        borderBottom: '1px solid var(--border)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0 20px',
-        background: 'var(--bg-card)',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100,
-        gap: 16,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
-        <div
-          onClick={() => navigate('/')}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}
-        >
-          <GraduationCap size={24} color="var(--primary)" />
-          <span style={{ fontWeight: 700, fontSize: 18, color: 'var(--text)' }}>
-            GRE Prep
-          </span>
-        </div>
-        {title && (
-          <span style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
-            / {title}
-          </span>
-        )}
+    <header className="app-header">
+      <div className="app-brand-wrap">
+        <button onClick={() => navigate('/')} className="app-brand" aria-label="Go to dashboard">
+          <span className="app-brand-icon"><GraduationCap size={22} /></span>
+          <span>GRE Prep</span>
+        </button>
+        {title && <span className="app-title-crumb">/ {title}</span>}
       </div>
 
-      <nav style={{ display: 'flex', alignItems: 'center', gap: 2, overflow: 'hidden' }}>
+      <nav className="app-nav" aria-label="Primary navigation">
         {navLinks.map(link => {
           const isActive = location.pathname === link.path || (link.path !== '/' && location.pathname.startsWith(link.path))
           const Icon = link.icon
@@ -70,91 +47,27 @@ export function Header({ openTopics, title }: HeaderProps) {
             <button
               key={link.path}
               onClick={() => navigate(link.path)}
-              style={{
-                padding: '6px 12px',
-                borderRadius: 'var(--radius)',
-                border: 'none',
-                background: isActive ? 'var(--primary-light)' : 'transparent',
-                color: isActive ? 'var(--primary)' : 'var(--text-secondary)',
-                cursor: 'pointer',
-                fontSize: 13,
-                fontWeight: isActive ? 600 : 500,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                whiteSpace: 'nowrap',
-                transition: 'all var(--transition)',
-              }}
-              onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--bg-secondary)'; e.currentTarget.style.color = 'var(--text)' }}
-              onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' } }}
+              className={`app-nav-link ${isActive ? 'active' : ''}`}
             >
               <Icon size={16} />
-              {link.label}
+              <span>{link.label}</span>
             </button>
           )
         })}
-        <button
-          onClick={openTopics}
-          style={{
-            padding: '6px 12px',
-            borderRadius: 'var(--radius)',
-            border: 'none',
-            background: 'transparent',
-            color: 'var(--text-secondary)',
-            cursor: 'pointer',
-            fontSize: 13,
-            fontWeight: 500,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            whiteSpace: 'nowrap',
-            transition: 'all var(--transition)',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-secondary)'; e.currentTarget.style.color = 'var(--text)' }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-        >
+        <button onClick={openTopics} className="app-nav-link">
           <BookOpen size={16} />
-          Topics
+          <span>Topics</span>
         </button>
       </nav>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+      <div className="app-header-actions">
         {user && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: '50%',
-                background: 'var(--primary-light)',
-                color: 'var(--primary)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 14,
-                fontWeight: 600,
-              }}
-            >
+          <div className="app-user-pill">
+            <div className="app-user-avatar">
               {user.email?.[0].toUpperCase() || <User size={16} />}
             </div>
-            <span style={{ fontSize: 13, color: 'var(--text-secondary)', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {user.email}
-            </span>
-            <button
-              onClick={handleSignOut}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-muted)',
-                padding: 6,
-                display: 'flex',
-                cursor: 'pointer',
-                borderRadius: 'var(--radius)',
-              }}
-              title="Sign out"
-              onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-secondary)'; e.currentTarget.style.color = 'var(--accent)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
-            >
+            <span>{user.email}</span>
+            <button onClick={handleSignOut} className="app-icon-action danger" title="Sign out" aria-label="Sign out">
               <LogOut size={18} />
             </button>
           </div>

@@ -1,203 +1,160 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BarChart3, Target, Brain, Clock, TrendingUp, Flame, BookOpen } from 'lucide-react'
+import { BarChart3, Target, Brain, Clock, TrendingUp, Flame, BookOpen, ArrowRight, Sparkles } from 'lucide-react'
 import { useLocalStorage } from '../../hooks/useLocalStorage'
 import { calculateAccuracy, getWeakTopics, getStudyStreak, getRecommendedTopics } from '../../utils/analytics'
 import { curriculum } from '../../data/curriculum'
 import { vocabularyWords } from '../../data/vocabulary'
-import type { UserProgress, PracticeResult, MockTestResult } from '../../types'
-
-const statCardStyle: React.CSSProperties = {
-  background: 'var(--bg-card)',
-  border: '1px solid var(--border)',
-  borderRadius: 'var(--radius-lg)',
-  padding: 24,
-  display: 'flex',
-  alignItems: 'center',
-  gap: 16,
-}
+import type { PracticeResult, MockTestResult } from '../../types'
 
 export function AnalyticsDashboard() {
   const navigate = useNavigate()
   const [results] = useLocalStorage<PracticeResult[]>('gre-practice-results', [])
   const [mockResults] = useLocalStorage<MockTestResult[]>('gre-mock-test-results', [])
-  const [progress] = useLocalStorage<UserProgress>('gre-progress', {
-    topicsCompleted: [],
-    lessonsCompleted: [],
-    practiceHistory: [],
-    mockTestHistory: [],
-    vocabMastered: [],
-    vocabLearning: [],
-    studyStreak: 0,
-    lastStudyDate: '',
-    totalStudyTime: 0,
-  })
 
   const accuracy = useMemo(() => calculateAccuracy(results), [results])
   const weakTopics = useMemo(() => getWeakTopics(results), [results])
   const streak = useMemo(() => getStudyStreak(results), [results])
   const recommended = useMemo(() => getRecommendedTopics(results), [results])
   const totalPractice = results.length
-  const totalMockTests = mockResults.length
-  const lastMockScore = mockResults.length > 0 ? mockResults[mockResults.length - 1].totalScore : null
   const avgMockScore = mockResults.length > 0 ? Math.round(mockResults.reduce((s, r) => s + r.totalScore, 0) / mockResults.length) : null
-
   const totalVocab = vocabularyWords.length
 
+  const stats = [
+    { label: 'Day streak', value: streak, icon: Flame, tone: 'orange' },
+    { label: 'Accuracy', value: `${accuracy}%`, icon: Target, tone: 'blue' },
+    { label: 'Questions done', value: totalPractice, icon: Brain, tone: 'green' },
+    { label: 'Avg mock score', value: avgMockScore ?? '-', icon: BarChart3, tone: 'red' },
+    { label: 'Mock tests', value: mockResults.length, icon: Clock, tone: 'purple' },
+    { label: 'Vocab words', value: totalVocab, icon: BookOpen, tone: 'cyan' },
+  ]
+
+  const quickActions = [
+    { label: 'Practice Quant', path: '/practice?type=quant', icon: '📐', color: '#1a73e8' },
+    { label: 'Practice Verbal', path: '/practice?type=verbal', icon: '📖', color: '#16a34a' },
+    { label: 'Study Flashcards', path: '/flashcards', icon: '🃏', color: '#7c3aed' },
+    { label: 'Review Vocabulary', path: '/vocabulary', icon: '📚', color: '#0891b2' },
+    { label: 'Take Mock Test', path: '/mock-test', icon: '📝', color: '#ea4335' },
+    { label: 'Full Analytics', path: '/analytics', icon: '📊', color: '#f97316' },
+  ]
+
   return (
-    <div>
-      <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 24 }}>Dashboard</h1>
+    <div className="dashboard-page">
+      <section className="dashboard-hero">
+        <div>
+          <div className="vocab-kicker">Study command center</div>
+          <h1>Dashboard</h1>
+          <p>Track your GRE momentum, pick the next useful task, and keep the session lightweight.</p>
+        </div>
+        <button onClick={() => navigate('/learn')} className="dashboard-primary-action">
+          <Sparkles size={17} /> Continue learning
+        </button>
+      </section>
 
-      {/* Stats Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16, marginBottom: 32 }}>
-        <div style={statCardStyle}>
-          <Flame size={28} color="#f97316" />
-          <div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>{streak}</div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Day Streak</div>
-          </div>
-        </div>
-        <div style={statCardStyle}>
-          <Target size={28} color="var(--primary)" />
-          <div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>{accuracy}%</div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Accuracy</div>
-          </div>
-        </div>
-        <div style={statCardStyle}>
-          <Brain size={28} color="var(--secondary)" />
-          <div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>{totalPractice}</div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Questions Done</div>
-          </div>
-        </div>
-        <div style={statCardStyle}>
-          <BarChart3 size={28} color="var(--accent)" />
-          <div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>{avgMockScore ?? '—'}</div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Avg Mock Score</div>
-          </div>
-        </div>
-        <div style={statCardStyle}>
-          <Clock size={28} color="#8b5cf6" />
-          <div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>{mockResults.length}</div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Mock Tests</div>
-          </div>
-        </div>
-        <div style={statCardStyle}>
-          <BookOpen size={28} color="#06b6d4" />
-          <div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>{totalVocab}</div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Vocab Words</div>
-          </div>
-        </div>
-      </div>
+      <section className="dashboard-stats-grid">
+        {stats.map(stat => {
+          const Icon = stat.icon
+          return (
+            <div key={stat.label} className={`dashboard-stat-card ${stat.tone}`}>
+              <div className="dashboard-stat-icon"><Icon size={23} /></div>
+              <div>
+                <strong>{stat.value}</strong>
+                <span>{stat.label}</span>
+              </div>
+            </div>
+          )
+        })}
+      </section>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
-        {/* Topic Performance */}
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 24 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Target size={20} color="var(--primary)" /> Topic Performance
-          </h2>
+      <section className="dashboard-panels">
+        <div className="dashboard-panel">
+          <div className="dashboard-panel-title">
+            <Target size={20} /> Topic Performance
+          </div>
           {weakTopics.length > 0 ? (
-            <div style={{ display: 'grid', gap: 8 }}>
+            <div className="dashboard-topic-bars">
               {weakTopics.slice(0, 8).map(w => (
-                <div key={w.topic}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 13 }}>
-                    <span style={{ color: 'var(--text)' }}>{w.topic}</span>
-                    <span style={{ fontWeight: 600, color: w.accuracy < 50 ? 'var(--accent)' : w.accuracy < 70 ? 'var(--warning)' : 'var(--secondary)' }}>
-                      {w.accuracy}%
-                    </span>
+                <div key={w.topic} className="dashboard-topic-row">
+                  <div>
+                    <span>{w.topic}</span>
+                    <strong className={w.accuracy < 50 ? 'low' : w.accuracy < 70 ? 'mid' : 'high'}>{w.accuracy}%</strong>
                   </div>
-                  <div style={{ height: 6, background: 'var(--bg-secondary)', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{
-                      height: '100%',
-                      width: `${Math.max(Math.min(w.accuracy, 100), 0)}%`,
-                      background: w.accuracy < 50 ? 'var(--accent)' : w.accuracy < 70 ? 'var(--warning)' : 'var(--secondary)',
-                      borderRadius: 3,
-                      transition: 'width 0.5s ease',
-                    }} />
+                  <div className="dashboard-bar-track">
+                    <div
+                      className={w.accuracy < 50 ? 'low' : w.accuracy < 70 ? 'mid' : 'high'}
+                      style={{ width: `${Math.max(Math.min(w.accuracy, 100), 0)}%` }}
+                    />
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Start practicing to see your performance.</p>
+            <div className="dashboard-empty-panel">
+              <Brain size={28} />
+              <strong>No practice data yet</strong>
+              <span>Answer a few questions to see topic performance.</span>
+            </div>
           )}
         </div>
 
-        {/* Recommendations */}
-        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 24 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <TrendingUp size={20} color="var(--accent)" /> Recommended Focus
-          </h2>
+        <div className="dashboard-panel">
+          <div className="dashboard-panel-title accent">
+            <TrendingUp size={20} /> Recommended Focus
+          </div>
           {recommended.length > 0 ? (
-            <div style={{ display: 'grid', gap: 8 }}>
+            <div className="dashboard-recommend-list">
               {recommended.slice(0, 6).map(topicId => {
                 const topic = curriculum.find(t => t.id === topicId)
+                const weakTopic = weakTopics.find(w => w.topic === topicId)
+                const topicAccuracy = weakTopic ? weakTopic.accuracy : null
                 return (
-                  <div
-                    key={topicId}
-                    onClick={() => navigate(`/learn/${topicId}`)}
-                    style={{
-                      padding: '12px 16px',
-                      background: 'var(--bg-secondary)',
-                      borderRadius: 'var(--radius)',
-                      cursor: 'pointer',
-                      border: '1px solid var(--border-light)',
-                      transition: 'all var(--transition)',
-                    }}
-                  >
-                    <div style={{ fontWeight: 600, fontSize: 14 }}>{topic?.icon} {topic?.title || topicId}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                      Accuracy below 60% — click to study
+                  <button key={topicId} onClick={() => navigate(`/learn/${topicId}`)} className="dashboard-recommend-card">
+                    <span className="recommend-icon">{topic?.icon || '📘'}</span>
+                    <div className="recommend-details">
+                      <div className="recommend-title-row">
+                        <strong>{topic?.title || topicId}</strong>
+                        {topic?.category && (
+                          <span className={`category-badge ${topic.category}`}>
+                            {topic.category.toUpperCase()}
+                          </span>
+                        )}
+                      </div>
+                      <small>
+                        {topicAccuracy !== null ? `Current Accuracy: ${topicAccuracy}%` : 'Accuracy below 60%'} • Review this next
+                      </small>
                     </div>
-                  </div>
+                    <ArrowRight size={16} className="recommend-arrow" />
+                  </button>
                 )
               })}
             </div>
           ) : (
-            <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Complete more practice to get recommendations.</p>
+            <div className="dashboard-empty-panel">
+              <TrendingUp size={28} />
+              <strong>No weak spots yet</strong>
+              <span>Complete more practice to unlock recommendations.</span>
+            </div>
           )}
         </div>
-      </div>
+      </section>
 
-      {/* Quick Actions */}
-      <div style={{ marginTop: 32 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: 16 }}>Quick Actions</h2>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          {[
-            { label: 'Practice Quant', path: '/practice?type=quant', icon: '📐', color: '#1a73e8' },
-            { label: 'Practice Verbal', path: '/practice?type=verbal', icon: '📖', color: '#34a853' },
-            { label: 'Study Flashcards', path: '/flashcards', icon: '🃏', color: '#8b5cf6' },
-            { label: 'Review Vocabulary', path: '/vocabulary', icon: '📚', color: '#06b6d4' },
-            { label: 'Take Mock Test', path: '/mock-test', icon: '📝', color: '#ea4335' },
-            { label: 'View Full Analytics', path: '/analytics', icon: '📊', color: '#f97316' },
-          ].map(action => (
-            <div
+      <section className="dashboard-actions-section">
+        <div className="dashboard-section-heading">Quick Actions</div>
+        <div className="dashboard-actions-grid">
+          {quickActions.map(action => (
+            <button
               key={action.label}
               onClick={() => navigate(action.path)}
-              style={{
-                padding: '16px 24px',
-                background: 'var(--bg-card)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-lg)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                transition: 'all var(--transition)',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.boxShadow = 'var(--shadow-lg)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
-              onMouseLeave={e => { e.currentTarget.style.boxShadow = 'var(--shadow)'; e.currentTarget.style.transform = 'translateY(0)' }}
+              className="dashboard-action-card"
+              style={{ '--action-color': action.color } as React.CSSProperties}
             >
-              <span style={{ fontSize: 24 }}>{action.icon}</span>
-              <span style={{ fontWeight: 600, fontSize: 14 }}>{action.label}</span>
-            </div>
+              <span>{action.icon}</span>
+              <strong>{action.label}</strong>
+              <ArrowRight size={16} />
+            </button>
           ))}
         </div>
-      </div>
+      </section>
     </div>
   )
 }
