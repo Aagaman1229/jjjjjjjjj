@@ -5,10 +5,10 @@ import { shuffleArray } from '../../utils/helpers'
 import type { VocabularyWord } from '../../types'
 
 const badgeStyle = (bg: string, color: string): React.CSSProperties => ({
-  padding: '2px 10px',
-  borderRadius: 12,
-  fontSize: 11,
-  fontWeight: 600,
+  padding: '4px 12px',
+  borderRadius: 999,
+  fontSize: 12,
+  fontWeight: 750,
   background: bg,
   color,
 })
@@ -55,10 +55,11 @@ export function FlashcardView() {
     setFlipped(false)
   }
 
-  useEffect(() => {
+  const handleFilterChange = (value: string) => {
+    setFilter(value)
     setCurrentIndex(0)
     setFlipped(false)
-  }, [filter])
+  }
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -84,23 +85,23 @@ export function FlashcardView() {
   }
 
   const diffMap: Record<string, { bg: string; color: string }> = {
-    easy: { bg: '#dcfce7', color: '#16a34a' },
-    medium: { bg: '#fef9c3', color: '#ca8a04' },
-    hard: { bg: '#fecaca', color: '#dc2626' },
+    easy: { bg: '#dcfce7', color: '#15803d' },
+    medium: { bg: '#fef3c7', color: '#b45309' },
+    hard: { bg: '#fee2e2', color: '#b91c1c' },
   }
 
   const freqMap: Record<string, { bg: string; color: string }> = {
-    high: { bg: '#e0f2fe', color: '#0284c7' },
-    medium: { bg: '#f3e8ff', color: '#7c3aed' },
-    low: { bg: '#f1f5f9', color: '#64748b' },
+    high: { bg: '#dbeafe', color: '#1d4ed8' },
+    medium: { bg: '#f3e8ff', color: '#7e22ce' },
+    low: { bg: '#f1f5f9', color: '#475569' },
   }
 
   if (filteredWords.length === 0) {
     return (
-      <div style={{ textAlign: 'center', padding: 60 }}>
-        <RotateCw size={48} style={{ color: 'var(--text-muted)', marginBottom: 16 }} />
-        <h2 style={{ color: 'var(--text-secondary)', marginBottom: 8 }}>No words found</h2>
-        <p style={{ color: 'var(--text-muted)' }}>Try a different filter.</p>
+      <div className="flash-empty">
+        <RotateCw size={48} />
+        <h2>No words found</h2>
+        <p>Try a different level.</p>
       </div>
     )
   }
@@ -108,83 +109,39 @@ export function FlashcardView() {
   if (!currentWord) return null
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
+    <div className="flash-page">
+      <div className="flash-header">
         <div>
-          <h1 style={{ fontSize: 28, fontWeight: 700 }}>Flashcards</h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{totalCards} words</p>
+          <div className="vocab-kicker">Vocabulary drill</div>
+          <h1 className="flash-title">Flashcards</h1>
+          <p className="flash-subtitle">Large cards for focused word recall and quick review.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <select
-            value={filter}
-            onChange={e => setFilter(e.target.value)}
-            style={{
-              padding: '8px 12px',
-              borderRadius: 'var(--radius)',
-              border: '1px solid var(--border)',
-              background: 'var(--bg-card)',
-              color: 'var(--text)',
-              fontSize: 13,
-              fontWeight: 500,
-              outline: 'none',
-            }}
-          >
-            <option value="all">All Levels</option>
+        <div className="flash-controls">
+          <select value={filter} onChange={e => handleFilterChange(e.target.value)} className="flash-select">
+            <option value="all">All levels</option>
             <option value="easy">Easy</option>
             <option value="medium">Medium</option>
             <option value="hard">Hard</option>
           </select>
-          <button
-            onClick={reshuffle}
-            style={{
-              padding: '8px 12px',
-              borderRadius: 'var(--radius)',
-              border: '1px solid var(--border)',
-              background: 'var(--bg-card)',
-              color: 'var(--text)',
-              cursor: 'pointer',
-              fontSize: 13,
-              fontWeight: 500,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            <Shuffle size={14} /> Shuffle
+          <button onClick={reshuffle} className="flash-button">
+            <Shuffle size={15} /> Shuffle
           </button>
         </div>
       </div>
 
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ height: 4, background: 'var(--bg-secondary)', borderRadius: 2, overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: `${progress}%`, background: 'var(--primary)', borderRadius: 2, transition: 'width 0.3s ease' }} />
+      <div className="flash-progress-wrap">
+        <div className="flash-progress-track">
+          <div className="flash-progress-bar" style={{ width: `${progress}%` }} />
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+        <div className="flash-progress-meta">
           <span>Card {currentIndex + 1} of {totalCards}</span>
+          <span>{Math.round(progress)}% complete</span>
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: 600, margin: '0 auto' }}>
-        <button
-          onClick={goPrev}
-          disabled={currentIndex === 0}
-          style={{
-            flexShrink: 0,
-            width: 44,
-            height: 44,
-            borderRadius: '50%',
-            border: '1px solid var(--border)',
-            background: 'var(--bg-card)',
-            color: currentIndex === 0 ? 'var(--text-muted)' : 'var(--text)',
-            cursor: currentIndex === 0 ? 'default' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: currentIndex === 0 ? 0.4 : 1,
-            transition: 'all var(--transition)',
-          }}
-        >
-          <ChevronLeft size={20} />
+      <div className="flash-stage">
+        <button onClick={goPrev} disabled={currentIndex === 0} className="flash-nav-btn" aria-label="Previous card">
+          <ChevronLeft size={24} />
         </button>
 
         <div
@@ -192,121 +149,74 @@ export function FlashcardView() {
           onClick={() => setFlipped(f => !f)}
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
-          style={{
-            flex: 1,
-            minHeight: 320,
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-lg)',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-            cursor: 'pointer',
-            textAlign: 'center',
-            userSelect: 'none',
-            transition: 'all 0.3s ease',
-            boxShadow: 'var(--shadow-lg)',
-            position: 'relative',
-          }}
+          className={`flash-card ${flipped ? 'is-flipped' : ''}`}
         >
           {!flipped ? (
-            <div style={{ width: '100%' }}>
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginBottom: 20 }}>
+            <div className="flash-front">
+              <div className="flash-badges">
                 <span style={badgeStyle(diffMap[currentWord.difficulty].bg, diffMap[currentWord.difficulty].color)}>
                   {currentWord.difficulty}
                 </span>
                 <span style={badgeStyle(freqMap[currentWord.frequency].bg, freqMap[currentWord.frequency].color)}>
-                  {currentWord.frequency}
+                  {currentWord.frequency} frequency
                 </span>
               </div>
-              <div style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.3, color: 'var(--text)', marginBottom: 16 }}>
-                {currentWord.word}
-              </div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                Tap or press Space to reveal
-              </div>
+              <div className="flash-word">{currentWord.word}</div>
+              <div className="flash-hint">Tap card or press Space to reveal meaning</div>
             </div>
           ) : (
-            <div style={{ width: '100%', textAlign: 'left' }}>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
-                Definition
-              </div>
-              <div style={{ fontSize: 16, lineHeight: 1.6, color: 'var(--text)', marginBottom: 16, fontWeight: 500 }}>
-                {currentWord.definition}
+            <div className="flash-back">
+              <div className="flash-answer-top">
+                <div>
+                  <div className="flash-label">Word</div>
+                  <h2>{currentWord.word}</h2>
+                </div>
+                <div className="flash-badges compact">
+                  <span style={badgeStyle(diffMap[currentWord.difficulty].bg, diffMap[currentWord.difficulty].color)}>
+                    {currentWord.difficulty}
+                  </span>
+                </div>
               </div>
 
+              <section className="flash-answer-section primary">
+                <div className="flash-label">Definition</div>
+                <p>{currentWord.definition}</p>
+              </section>
+
               {currentWord.examples.length > 0 && (
-                <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
-                    Example
-                  </div>
-                  <div style={{ fontSize: 14, lineHeight: 1.5, color: 'var(--text-secondary)', fontStyle: 'italic' }}>
-                    "{currentWord.examples[0]}"
-                  </div>
-                </div>
+                <section className="flash-answer-section">
+                  <div className="flash-label">Example</div>
+                  <p>{currentWord.examples[0]}</p>
+                </section>
               )}
 
               {currentWord.synonyms.length > 0 && (
-                <div style={{ marginBottom: 12, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 12, color: 'var(--secondary)', fontWeight: 600, marginRight: 2 }}>Synonyms:</span>
-                  {currentWord.synonyms.map((s, i) => (
-                    <span key={i} style={{ padding: '1px 8px', borderRadius: 8, fontSize: 12, background: 'rgba(52,168,83,0.1)', color: 'var(--secondary)' }}>{s}</span>
-                  ))}
-                </div>
+                <section className="flash-answer-section">
+                  <div className="flash-label">Synonyms</div>
+                  <div className="flash-chip-row">
+                    {currentWord.synonyms.map((s, i) => <span key={i} className="flash-chip green">{s}</span>)}
+                  </div>
+                </section>
               )}
 
               {currentWord.mnemonics && (
-                <div style={{
-                  marginTop: 8,
-                  padding: '8px 12px',
-                  background: 'rgba(251,191,36,0.1)',
-                  borderRadius: 'var(--radius)',
-                  fontSize: 13,
-                  lineHeight: 1.5,
-                  color: 'var(--text)',
-                  border: '1px solid rgba(251,191,36,0.2)',
-                }}>
-                  <strong style={{ color: 'var(--warning)' }}>🧠 Mnemonic:</strong> {currentWord.mnemonics}
-                </div>
+                <section className="flash-answer-section mnemonic">
+                  <div className="flash-label">Mnemonic</div>
+                  <p>{currentWord.mnemonics}</p>
+                </section>
               )}
 
-              <div style={{ marginTop: 16, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
-                Tap to see word
-              </div>
+              <div className="flash-hint bottom">Tap again to return to the word</div>
             </div>
           )}
         </div>
 
-        <button
-          onClick={goNext}
-          disabled={currentIndex >= totalCards - 1}
-          style={{
-            flexShrink: 0,
-            width: 44,
-            height: 44,
-            borderRadius: '50%',
-            border: '1px solid var(--border)',
-            background: 'var(--bg-card)',
-            color: currentIndex >= totalCards - 1 ? 'var(--text-muted)' : 'var(--text)',
-            cursor: currentIndex >= totalCards - 1 ? 'default' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: currentIndex >= totalCards - 1 ? 0.4 : 1,
-            transition: 'all var(--transition)',
-          }}
-        >
-          <ChevronRight size={20} />
+        <button onClick={goNext} disabled={currentIndex >= totalCards - 1} className="flash-nav-btn" aria-label="Next card">
+          <ChevronRight size={24} />
         </button>
       </div>
 
-      <div style={{ textAlign: 'center', marginTop: 16 }}>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-          Keyboard: ←  → navigate · Space to flip
-        </span>
-      </div>
+      <div className="flash-keyboard-note">Use Arrow keys to move between cards. Press Space to flip.</div>
     </div>
   )
 }
