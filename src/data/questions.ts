@@ -1,4 +1,5 @@
 import type { Question } from '../types'
+import { generatedQuestions } from './generated_questions'
 
 export const questions: Question[] = [
   // =======================================================================
@@ -22632,4 +22633,5 @@ export const questions: Question[] = [
     answers: ['B', 'C', 'D', 'E', 'F'],
     selectCount: 0,
   },
+  ...generatedQuestions,
 ]

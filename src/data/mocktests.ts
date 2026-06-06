@@ -1,4 +1,5 @@
 import type { MockTest } from '../types'
+import { generatedMockTests } from './generated_mocktests'
 
 const v1 = Array.from({ length: 25 }, (_, i) => `ets_v1_${String(i + 1).padStart(3, '0')}`)
 const v2 = Array.from({ length: 25 }, (_, i) => `ets_v2_${String(i + 1).padStart(3, '0')}`)
@@ -146,4 +147,5 @@ export const mockTests: MockTest[] = [
       { id: 'qvd_sec1', name: 'Verbal Reasoning', type: 'verbal', duration: 15, questionRange: [1, 10], questions: qv(261, 10) },
     ],
   },
+  ...generatedMockTests,
 ]
