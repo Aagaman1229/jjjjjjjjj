@@ -1,10 +1,11 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, CheckCircle, AlertTriangle, Zap, Beaker, BookOpen, ListChecks, Lightbulb, Target, Type, CheckSquare, Square, Eye, EyeOff } from 'lucide-react'
+import { ArrowLeft, CheckCircle, AlertTriangle, Zap, Beaker, BookOpen, ListChecks, Lightbulb, Target, Type, CheckSquare, Square, Eye, EyeOff, MessageCircleMore } from 'lucide-react'
 import { getTopicById } from '../../data/curriculum'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useLocalStorage } from '../../hooks/useLocalStorage'
+import { simplifyText } from '../../utils/aiService'
 
 export function LessonView() {
   const { topicId, lessonId } = useParams()
@@ -20,6 +21,24 @@ export function LessonView() {
   const [checkedGoals, setCheckedGoals] = useLocalStorage<Record<string, boolean>>('gre-lesson-checked-goals', {})
   const [activeTab, setActiveTab] = useState('guide')
   const [revealedExamples, setRevealedExamples] = useState<Record<string, Record<number, boolean>>>({})
+  const [apiKey] = useLocalStorage<string | null>('gre-groq-key', null)
+  const [simplifiedText, setSimplifiedText] = useState('')
+  const [simplifyLoading, setSimplifyLoading] = useState(false)
+
+  const handleSimplify = async () => {
+    const sel = window.getSelection()
+    const text = sel?.toString().trim()
+    if (!text || simplifyLoading || !apiKey) return
+    setSimplifyLoading(true)
+    setSimplifiedText('')
+    try {
+      const result = await simplifyText(text, apiKey)
+      setSimplifiedText(result)
+    } catch {
+      setSimplifiedText('Failed to simplify. Check your API key.')
+    }
+    setSimplifyLoading(false)
+  }
 
   const availableTabs: string[] = []
   if (lesson) {
@@ -150,6 +169,17 @@ export function LessonView() {
                         >
                           A+
                         </button>
+                        <div className="toolbar-divider"></div>
+                        <button
+                          onClick={handleSimplify}
+                          disabled={simplifyLoading || !apiKey}
+                          className="toolbar-btn"
+                          title="Simplify selected text"
+                          style={{ opacity: simplifyLoading || !apiKey ? 0.5 : 1 }}
+                        >
+                          <MessageCircleMore size={15} />
+                          <span>{simplifyLoading ? 'Simplifying...' : 'Plain English'}</span>
+                        </button>
                       </div>
                     </div>
                     
@@ -189,6 +219,22 @@ export function LessonView() {
                     >
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{lesson.content}</ReactMarkdown>
                     </div>
+
+                    {simplifiedText && (
+                      <div className="lesson-callout blue" style={{ borderColor: 'var(--secondary)', background: 'rgba(52,168,83,0.08)' }}>
+                        <MessageCircleMore size={18} color="var(--secondary)" />
+                        <div>
+                          <strong>Plain English</strong>
+                          <p style={{ fontSize: 15, lineHeight: 1.7 }}>{simplifiedText}</p>
+                          <button
+                            onClick={() => setSimplifiedText('')}
+                            style={{ marginTop: 6, background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer', padding: 0 }}
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    )}
 
                     {lesson.explanation && (
                       <div className="lesson-callout blue">

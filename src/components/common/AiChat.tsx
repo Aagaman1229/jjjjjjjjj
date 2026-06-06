@@ -1,15 +1,20 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageCircle, X, Send, Sparkles, Settings, Bot, BookOpen, Key, ExternalLink, Check } from 'lucide-react'
-import { getAnswer, getSuggestedQuestions } from '../../utils/aiService'
+import { MessageCircle, X, Send, Sparkles, Settings, Bot, Key, ExternalLink, Check, Trash2 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
+import { getAnswer, getSocraticResponse, suggestedQuestions } from '../../utils/aiService'
 import { useLocalStorage } from '../../hooks/useLocalStorage'
+import { saveApiKey as saveApiKeyToDb, getApiKey as getApiKeyFromDb } from '../../lib/db'
+import { useAuth } from '../../contexts/AuthContext'
 import type { ChatMessage } from '../../utils/aiService'
 
 interface Message {
   id: string
   role: 'user' | 'bot'
   text: string
-  mode?: 'gemini' | 'local'
-  sources?: { title: string; topicId: string }[]
   followUps?: string[]
 }
 
@@ -124,8 +129,8 @@ const botBubbleStyle: React.CSSProperties = {
   fontSize: 14,
   lineHeight: 1.6,
   alignSelf: 'flex-start',
-  whiteSpace: 'pre-wrap',
   wordBreak: 'break-word',
+  overflowWrap: 'anywhere',
 }
 
 const overlayStyle: React.CSSProperties = {
@@ -152,15 +157,101 @@ const badgeStyle: React.CSSProperties = {
   fontWeight: 600,
 }
 
+const markdownComponents = {
+  p: ({ children }: { children: React.ReactNode }) => (
+    <p style={{ margin: '4px 0', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{children}</p>
+  ),
+  ul: ({ children }: { children: React.ReactNode }) => (
+    <ul style={{ margin: '4px 0', paddingLeft: 20 }}>{children}</ul>
+  ),
+  ol: ({ children }: { children: React.ReactNode }) => (
+    <ol style={{ margin: '4px 0', paddingLeft: 20 }}>{children}</ol>
+  ),
+  li: ({ children }: { children: React.ReactNode }) => (
+    <li style={{ marginBottom: 2 }}>{children}</li>
+  ),
+  code: ({ children, className }: { children: React.ReactNode; className?: string }) => {
+    const isInline = !className
+    if (isInline) {
+      return (
+        <code style={{
+          background: 'var(--bg)',
+          padding: '2px 6px',
+          borderRadius: 4,
+          fontSize: 13,
+          fontFamily: 'monospace',
+        }}>{children}</code>
+      )
+    }
+    return (
+      <pre style={{
+        background: 'var(--bg)',
+        padding: 12,
+        borderRadius: 'var(--radius)',
+        overflowX: 'auto',
+        fontSize: 13,
+        fontFamily: 'monospace',
+        lineHeight: 1.4,
+      }}>
+        <code>{children}</code>
+      </pre>
+    )
+  },
+  strong: ({ children }: { children: React.ReactNode }) => (
+    <strong style={{ fontWeight: 700 }}>{children}</strong>
+  ),
+  em: ({ children }: { children: React.ReactNode }) => (
+    <em>{children}</em>
+  ),
+  table: ({ children }: { children: React.ReactNode }) => (
+    <div style={{ overflowX: 'auto', margin: '8px 0' }}>
+      <table style={{
+        borderCollapse: 'collapse',
+        fontSize: 13,
+        width: '100%',
+      }}>{children}</table>
+    </div>
+  ),
+  th: ({ children }: { children: React.ReactNode }) => (
+    <th style={{
+      border: '1px solid var(--border)',
+      padding: '6px 10px',
+      background: 'var(--bg)',
+      textAlign: 'left',
+      fontWeight: 600,
+    }}>{children}</th>
+  ),
+  td: ({ children }: { children: React.ReactNode }) => (
+    <td style={{
+      border: '1px solid var(--border)',
+      padding: '6px 10px',
+    }}>{children}</td>
+  ),
+}
+
+type SocraticArgs = { question: string; wrongAnswer: string; correctAnswer: string }
+let _socraticTrigger: ((args: SocraticArgs) => void) | null = null
+
+export function triggerSocraticTutor(question: string, wrongAnswer: string, correctAnswer: string) {
+  _socraticTrigger?.({ question, wrongAnswer, correctAnswer })
+}
+
 export function AiChat() {
+  const { user } = useAuth()
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useLocalStorage<Message[]>('gre-chat-history', [])
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
-  const [apiKey, setApiKey] = useLocalStorage<string | null>('gre-gemini-key', null)
+  const [apiKey, setApiKey] = useLocalStorage<string | null>('gre-groq-key', null)
   const [keyInput, setKeyInput] = useState('')
   const [keySaved, setKeySaved] = useState(false)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [socraticSession, setSocraticSession] = useState<SocraticArgs | null>(null)
+  const initialSocraticSentRef = useRef(false)
+  const socraticApiKeyRef = useRef(apiKey)
+  socraticApiKeyRef.current = apiKey
+  const socraticContextRef = useRef('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -174,30 +265,81 @@ export function AiChat() {
     }
   }, [isOpen])
 
+  useEffect(() => {
+    if (!apiKey && user) {
+      getApiKeyFromDb(user.id, 'groq').then(key => {
+        if (key) setApiKey(key)
+      })
+    }
+  }, [user, apiKey, setApiKey])
+
+  useEffect(() => {
+    _socraticTrigger = (args) => {
+      initialSocraticSentRef.current = false
+      setSocraticSession(args)
+      setIsOpen(true)
+      setMessages([])
+    }
+    return () => { _socraticTrigger = null }
+  }, [setMessages, setIsOpen])
+
+  useEffect(() => {
+    if (!socraticSession || initialSocraticSentRef.current) return
+    const key = socraticApiKeyRef.current
+    if (!key) return
+
+    initialSocraticSentRef.current = true
+    setIsTyping(true)
+
+    const { question, wrongAnswer, correctAnswer } = socraticSession
+    socraticContextRef.current = `I'm working on this GRE problem:\n\n${question}\n\nI chose "${wrongAnswer}" but the correct answer is "${correctAnswer}". Help me understand why using the Socratic method — guide me with questions, don't give me the answer.`
+
+    getSocraticResponse([{ role: 'user', text: socraticContextRef.current }], key)
+      .then(response => {
+        const botMsg: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'bot',
+          text: response.text,
+        }
+        setMessages([botMsg])
+        setIsTyping(false)
+      })
+      .catch(() => {
+        setIsTyping(false)
+      })
+  }, [socraticSession])
+
   const handleSend = async (text: string) => {
     const q = text.trim()
-    if (!q || isTyping) return
+    if (!q || isTyping || !apiKey) return
 
     const userMsg: Message = { id: Date.now().toString(), role: 'user', text: q }
     setMessages(prev => [...prev, userMsg])
     setInput('')
     setIsTyping(true)
 
-    const chatHistory: ChatMessage[] = messages
+    let chatHistory: ChatMessage[] = messages
       .filter(m => m.role === 'user' || m.role === 'bot')
       .slice(-6)
-      .map(m => ({ role: m.role === 'user' ? 'user' as const : 'model' as const, text: m.text }))
+      .map(m => ({ role: m.role === 'user' ? 'user' as const : 'assistant' as const, text: m.text }))
+
+    if (socraticSession) {
+      chatHistory = [
+        { role: 'user' as const, text: socraticContextRef.current },
+        ...chatHistory,
+      ]
+    }
 
     chatHistory.push({ role: 'user', text: q })
 
     try {
-      const response = await getAnswer(chatHistory, apiKey)
+      const response = socraticSession
+        ? await getSocraticResponse(chatHistory, apiKey)
+        : await getAnswer(chatHistory, apiKey)
       const botMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'bot',
         text: response.text,
-        mode: response.mode,
-        sources: response.sources,
         followUps: response.followUps,
       }
       setMessages(prev => [...prev, botMsg])
@@ -205,7 +347,7 @@ export function AiChat() {
       const botMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'bot',
-        text: 'Sorry, I ran into an error. Please try again.',
+        text: 'Sorry, I ran into an error. Please check your API key and try again.',
         followUps: ['What is PEMDAS?', 'Explain the quadratic formula'],
       }
       setMessages(prev => [...prev, botMsg])
@@ -220,13 +362,17 @@ export function AiChat() {
     }
   }
 
-  const saveApiKey = () => {
+  const saveApiKeyHandler = async () => {
     const k = keyInput.trim()
-    if (k.startsWith('AIza')) {
-      setApiKey(k)
-      setKeySaved(true)
-      setTimeout(() => setKeySaved(false), 2000)
-      setShowSettings(false)
+    if (!k) return
+
+    setApiKey(k)
+    setKeySaved(true)
+    setTimeout(() => setKeySaved(false), 2000)
+    setShowSettings(false)
+
+    if (user) {
+      await saveApiKeyToDb(user.id, 'groq', k)
     }
   }
 
@@ -235,72 +381,13 @@ export function AiChat() {
     setKeyInput('')
   }
 
-  const suggestedQuestions = getSuggestedQuestions()
-
-  const renderText = (text: string | undefined | null) => {
-    const lines = (text || '').split('\n')
-    const elements: React.ReactNode[] = []
-    let inList = false
-    let listItems: React.ReactNode[] = []
-
-    lines.forEach((line, i) => {
-      const trimmed = line.trim()
-      const isListItem = /^[\d]+\.\s/.test(trimmed) || /^[-*]\s/.test(trimmed)
-
-      if (isListItem) {
-        inList = true
-        const content = trimmed.replace(/^[\d]+\.\s/, '').replace(/^[-*]\s/, '')
-        listItems.push(
-          <li key={`li-${i}`} style={{ marginLeft: 16, marginBottom: 2 }}>
-            {renderInline(content)}
-          </li>
-        )
-        return
-      }
-
-      if (inList) {
-        elements.push(<ul key={`list-${i}`} style={{ margin: '4px 0', padding: 0 }}>{listItems}</ul>)
-        listItems = []
-        inList = false
-      }
-
-      if (!trimmed) {
-        elements.push(<br key={`br-${i}`} />)
-        return
-      }
-
-      if (trimmed.startsWith('**') && trimmed.endsWith('**')) {
-        elements.push(
-          <div key={`h-${i}`} style={{ fontWeight: 700, fontSize: 15, marginTop: 8, marginBottom: 4 }}>
-            {trimmed.slice(2, -2)}
-          </div>
-        )
-        return
-      }
-
-      elements.push(
-        <div key={`p-${i}`} style={{ marginBottom: 2 }}>
-          {renderInline(line)}
-        </div>
-      )
-    })
-
-    if (inList) {
-      elements.push(<ul key="list-end" style={{ margin: '4px 0', padding: 0 }}>{listItems}</ul>)
-    }
-
-    return elements
+  const clearMessages = () => {
+    setMessages([])
+    setSocraticSession(null)
+    setShowClearConfirm(false)
   }
 
-  const renderInline = (text: string) => {
-    const parts = text.split(/(\*\*[^*]+\*\*)/g)
-    return parts.map((part, i) => {
-      if (part.startsWith('**') && part.endsWith('**')) {
-        return <strong key={i}>{part.slice(2, -2)}</strong>
-      }
-      return <span key={i}>{part}</span>
-    })
-  }
+  const needsKey = !apiKey
 
   return (
     <>
@@ -322,17 +409,38 @@ export function AiChat() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Sparkles size={18} color="var(--primary)" />
             <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--text)' }}>GRE Assistant</span>
-            {apiKey ? (
+            {apiKey && (
               <span style={{ ...badgeStyle, background: '#e8f5e9', color: '#2e7d32' }}>
                 <Bot size={10} /> AI
-              </span>
-            ) : (
-              <span style={{ ...badgeStyle, background: '#fff3e0', color: '#e65100' }}>
-                <BookOpen size={10} /> Local
               </span>
             )}
           </div>
           <div style={{ display: 'flex', gap: 4 }}>
+            {messages.length > 0 && !showClearConfirm ? (
+              <button
+                onClick={() => setShowClearConfirm(true)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 4 }}
+                title="Clear messages"
+              >
+                <Trash2 size={16} />
+              </button>
+            ) : showClearConfirm ? (
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: 'var(--accent)' }}>Clear all?</span>
+                <button
+                  onClick={clearMessages}
+                  style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 12, fontWeight: 600, padding: '2px 4px' }}
+                >
+                  Yes
+                </button>
+                <button
+                  onClick={() => setShowClearConfirm(false)}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 12, padding: '2px 4px' }}
+                >
+                  No
+                </button>
+              </div>
+            ) : null}
             <button
               onClick={() => { setShowSettings(!showSettings); setKeyInput(apiKey || '') }}
               style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: 4 }}
@@ -353,7 +461,7 @@ export function AiChat() {
           <div style={settingsPanelStyle}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
               <Key size={14} color="var(--text-secondary)" />
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Gemini API Key</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Groq API Key</span>
               {apiKey && (
                 <span style={{ ...badgeStyle, background: '#e8f5e9', color: '#2e7d32', fontSize: 10 }}>
                   <Check size={8} /> Connected
@@ -361,22 +469,22 @@ export function AiChat() {
               )}
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10, lineHeight: 1.5 }}>
-              Connect your free Google Gemini API key for AI-powered answers beyond the curriculum. Get one at{' '}
+              Connect your free Groq API key for AI-powered answers using Llama 3.1. Get one at{' '}
               <a
-                href="https://aistudio.google.com/apikey"
+                href="https://console.groq.com/keys"
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ color: 'var(--primary)' }}
               >
-                Google AI Studio <ExternalLink size={10} style={{ display: 'inline' }} />
+                console.groq.com <ExternalLink size={10} style={{ display: 'inline' }} />
               </a>
-              {' '}(free, no credit card, never expires).
+              {' '}(free tier available).
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
               <input
                 value={keyInput}
                 onChange={e => setKeyInput(e.target.value)}
-                placeholder="Paste your Gemini API key..."
+                placeholder="Paste your Groq API key (gsk_...)..."
                 style={{
                   flex: 1,
                   padding: '8px 10px',
@@ -387,10 +495,10 @@ export function AiChat() {
                   fontSize: 13,
                   outline: 'none',
                 }}
-                onKeyDown={e => { if (e.key === 'Enter') saveApiKey() }}
+                onKeyDown={e => { if (e.key === 'Enter') saveApiKeyHandler() }}
               />
               <button
-                onClick={saveApiKey}
+                onClick={saveApiKeyHandler}
                 style={{
                   padding: '8px 14px',
                   borderRadius: 'var(--radius)',
@@ -424,7 +532,7 @@ export function AiChat() {
             )}
             {keySaved && (
               <div style={{ marginTop: 8, fontSize: 12, color: 'var(--secondary)' }}>
-                ✓ API key saved! Messages will now use Gemini AI.
+                ✓ API key saved! You can now ask questions.
               </div>
             )}
           </div>
@@ -437,77 +545,125 @@ export function AiChat() {
               <p style={{ fontWeight: 600, fontSize: 16, marginBottom: 8, color: 'var(--text)' }}>
                 Hi! I'm your GRE study assistant
               </p>
-              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
-                  {apiKey
-                    ? `I'm powered by Gemini AI — ask me anything about GRE concepts, strategies, or practice problems.`
-                    : `I search the GRE curriculum to help you. Connect a free Gemini API key in settings for AI-powered answers!`}
-              </p>
-              {!apiKey && (
-                <div style={{ marginBottom: 16 }}>
-                  <button
-                    onClick={() => setShowSettings(true)}
-                    style={{
-                      padding: '8px 16px',
-                      borderRadius: 'var(--radius)',
-                      border: '1px solid var(--primary)',
-                      background: 'transparent',
-                      color: 'var(--primary)',
-                      fontSize: 13,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <Key size={12} style={{ marginRight: 4 }} /> Configure Gemini API
-                  </button>
-                </div>
+              {needsKey ? (
+                <>
+                  <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
+                    To get started, connect a free Groq API key. It powers the AI with Llama 3.1 for fast, accurate GRE help.
+                  </p>
+                  <div style={{ marginBottom: 16 }}>
+                    <button
+                      onClick={() => setShowSettings(true)}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: 'var(--radius)',
+                        border: '1px solid var(--primary)',
+                        background: 'transparent',
+                        color: 'var(--primary)',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <Key size={12} style={{ marginRight: 4 }} /> Configure Groq API
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+                    <a
+                      href="https://console.groq.com/keys"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: 'var(--primary)' }}
+                    >
+                      Don't have a key? Get one free <ExternalLink size={10} style={{ display: 'inline' }} />
+                    </a>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
+                    Ask me anything about GRE concepts, strategies, or practice problems.
+                  </p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+                    {suggestedQuestions.map((q, i) => (
+                      <button
+                        key={i}
+                        onClick={() => handleSend(q)}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: 'var(--radius)',
+                          border: '1px solid var(--border)',
+                          background: 'var(--bg)',
+                          color: 'var(--primary)',
+                          fontSize: 12,
+                          cursor: 'pointer',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'var(--primary-light)' }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg)' }}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
-                {suggestedQuestions.map((q, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleSend(q)}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: 'var(--radius)',
-                      border: '1px solid var(--border)',
-                      background: 'var(--bg)',
-                      color: 'var(--primary)',
-                      fontSize: 12,
-                      cursor: 'pointer',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--primary-light)' }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg)' }}
-                  >
-                    {q}
-                  </button>
-                ))}
+            </div>
+          )}
+
+          {socraticSession && (
+            <div style={{
+              background: 'var(--primary-light)',
+              border: '1px solid var(--primary)',
+              borderRadius: 'var(--radius)',
+              padding: '12px 14px',
+              marginBottom: 8,
+              fontSize: 13,
+              lineHeight: 1.5,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontWeight: 700, color: 'var(--primary)', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  Socratic Tutoring
+                </span>
+                <button
+                  onClick={() => { setSocraticSession(null); setMessages([]) }}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11, padding: 0 }}
+                >
+                  Exit
+                </button>
+              </div>
+              <div style={{ color: 'var(--text)', marginBottom: 4, whiteSpace: 'pre-wrap' }}>
+                {socraticSession.question}
+              </div>
+              <div style={{ color: 'var(--accent)', fontSize: 12 }}>
+                You answered: <strong>{socraticSession.wrongAnswer}</strong>
+              </div>
+              <div style={{ color: 'var(--secondary)', fontSize: 12 }}>
+                Correct answer: <strong>{socraticSession.correctAnswer}</strong>
               </div>
             </div>
           )}
 
           {messages.map(msg => (
             <div key={msg.id}>
-              {msg.role === 'bot' && msg.mode && (
+              {msg.role === 'bot' && (
                 <div style={{ marginLeft: 4, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  {msg.mode === 'gemini' ? (
-                    <span style={{ ...badgeStyle, background: '#e8f5e9', color: '#2e7d32' }}>
-                      <Bot size={10} /> AI
-                    </span>
-                  ) : (
-                    <span style={{ ...badgeStyle, background: '#fff3e0', color: '#e65100' }}>
-                      <BookOpen size={10} /> Local
-                    </span>
-                  )}
+                  <span style={{ ...badgeStyle, background: '#e8f5e9', color: '#2e7d32' }}>
+                    <Bot size={10} /> AI
+                  </span>
                 </div>
               )}
               <div style={msg.role === 'user' ? userBubbleStyle : botBubbleStyle}>
-                {renderText(msg.text)}
-                {msg.role === 'bot' && msg.sources && msg.sources.length > 0 && msg.mode === 'local' && (
-                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border-light)', fontSize: 12, color: 'var(--text-muted)' }}>
-                    📚 Sources: {msg.sources.map((s, i) => (
-                      <span key={i}>{i > 0 && ', '}{s.title}</span>
-                    ))}
-                  </div>
+                {msg.role === 'user' ? (
+                  msg.text.split('\n').map((line, i) => (
+                    <span key={i}>{i > 0 ? <br /> : null}{line}</span>
+                  ))
+                ) : (
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[rehypeKatex]}
+                    components={markdownComponents}
+                  >
+                    {msg.text}
+                  </ReactMarkdown>
                 )}
               </div>
               {msg.role === 'bot' && msg.followUps && msg.followUps.length > 0 && (
@@ -539,15 +695,9 @@ export function AiChat() {
           {isTyping && (
             <div>
               <div style={{ marginLeft: 4, marginBottom: 2 }}>
-                {apiKey ? (
-                  <span style={{ ...badgeStyle, background: '#e8f5e9', color: '#2e7d32' }}>
-                    <Bot size={10} /> AI
-                  </span>
-                ) : (
-                  <span style={{ ...badgeStyle, background: '#fff3e0', color: '#e65100' }}>
-                    <BookOpen size={10} /> Local
-                  </span>
-                )}
+                <span style={{ ...badgeStyle, background: '#e8f5e9', color: '#2e7d32' }}>
+                  <Bot size={10} /> AI
+                </span>
               </div>
               <div style={{ ...botBubbleStyle, display: 'flex', gap: 5, alignItems: 'center', padding: '14px 18px' }}>
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--text-muted)' }} />
@@ -565,15 +715,15 @@ export function AiChat() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={apiKey ? 'Ask anything about GRE...' : 'Ask a question about GRE topics...'}
+            placeholder={needsKey ? 'Add an API key in settings to start...' : 'Ask anything about GRE...'}
             rows={1}
             style={inputStyle}
-            disabled={isTyping}
+            disabled={isTyping || needsKey}
           />
           <button
             onClick={() => handleSend(input)}
-            style={{ ...sendBtnStyle, opacity: input.trim() && !isTyping ? 1 : 0.5 }}
-            disabled={!input.trim() || isTyping}
+            style={{ ...sendBtnStyle, opacity: input.trim() && !isTyping && !needsKey ? 1 : 0.5 }}
+            disabled={!input.trim() || isTyping || needsKey}
           >
             <Send size={16} />
           </button>

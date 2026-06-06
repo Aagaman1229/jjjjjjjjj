@@ -78,6 +78,9 @@ input, textarea, select {
 ::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
 
+.katex { white-space: normal !important; overflow-wrap: anywhere !important; }
+.katex-display { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
+
 .lesson-markdown {
   font-size: 16px;
   line-height: 1.8;

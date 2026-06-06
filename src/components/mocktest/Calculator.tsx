@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { useState } from 'react'
 import { Calculator as CalcIcon } from 'lucide-react'
 

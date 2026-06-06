@@ -1,7 +1,9 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
-import { ChevronLeft, ChevronRight, Shuffle, RotateCw } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Shuffle, RotateCw, Lightbulb, Mic, MicOff } from 'lucide-react'
 import { vocabularyWords } from '../../data/vocabulary'
 import { shuffleArray } from '../../utils/helpers'
+import { generateMnemonic, checkSpokenDefinition, transcribeAudio } from '../../utils/aiService'
+import { useLocalStorage } from '../../hooks/useLocalStorage'
 import type { VocabularyWord } from '../../types'
 
 const badgeStyle = (bg: string, color: string): React.CSSProperties => ({
@@ -19,6 +21,86 @@ export function FlashcardView() {
   const [shuffled, setShuffled] = useState<VocabularyWord[]>(() => shuffleArray(vocabularyWords))
   const [filter, setFilter] = useState<string>('all')
   const [touchStart, setTouchStart] = useState<number | null>(null)
+  const [apiKey] = useLocalStorage<string | null>('gre-groq-key', null)
+
+  const [aiMnemonic, setAiMnemonic] = useState('')
+  const [imagePrompt, setImagePrompt] = useState('')
+  const [mnemonicLoading, setMnemonicLoading] = useState(false)
+
+  const [isRecording, setIsRecording] = useState(false)
+  const [audioResult, setAudioResult] = useState('')
+  const [audioLoading, setAudioLoading] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+
+  const handleMnemonic = async () => {
+    if (!currentWord || mnemonicLoading || !apiKey) return
+    setMnemonicLoading(true)
+    try {
+      const result = await generateMnemonic(currentWord.word, currentWord.definition, apiKey)
+      setAiMnemonic(result.mnemonic)
+      setImagePrompt(result.imagePrompt)
+    } catch {
+      setAiMnemonic('Failed to generate mnemonic. Check your API key.')
+    }
+    setMnemonicLoading(false)
+  }
+
+  const startRecording = async () => {
+    if (!apiKey) return
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = recorder
+      audioChunksRef.current = []
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data)
+      }
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop())
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        if (blob.size < 100) return
+
+        setAudioLoading(true)
+        try {
+          const transcript = await transcribeAudio(blob, apiKey)
+          const result = await checkSpokenDefinition(
+            currentWord?.word || '',
+            currentWord?.definition || '',
+            transcript,
+            apiKey
+          )
+          setAudioResult(result.startsWith('correct') ? '✓ Correct!' : '✗ ' + result)
+        } catch {
+          setAudioResult('✗ Error checking answer.')
+        }
+        setAudioLoading(false)
+      }
+
+      audioChunksRef.current = []
+      recorder.start()
+      setIsRecording(true)
+
+      setTimeout(() => {
+        if (mediaRecorderRef.current?.state === 'recording') {
+          mediaRecorderRef.current.stop()
+          setIsRecording(false)
+        }
+      }, 4000)
+    } catch {
+      setAudioResult('✗ Microphone access denied.')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+    }
+  }
+
   const cardRef = useRef<HTMLDivElement>(null)
 
   const filteredWords = useMemo(() => {
@@ -60,6 +142,12 @@ export function FlashcardView() {
     setCurrentIndex(0)
     setFlipped(false)
   }
+
+  useEffect(() => {
+    setAiMnemonic('')
+    setImagePrompt('')
+    setAudioResult('')
+  }, [currentIndex])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -162,6 +250,43 @@ export function FlashcardView() {
                 </span>
               </div>
               <div className="flash-word">{currentWord.word}</div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                {apiKey && (
+                  <button
+                    onClick={e => { e.stopPropagation(); isRecording ? stopRecording() : startRecording() }}
+                    style={{
+                      background: isRecording ? 'var(--accent)' : 'var(--bg-card)',
+                      border: '2px solid var(--primary)',
+                      borderRadius: '50%',
+                      width: 44,
+                      height: 44,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      color: isRecording ? '#fff' : 'var(--primary)',
+                      transition: 'all 0.2s',
+                    }}
+                    title={isRecording ? 'Stop recording' : 'Speak the definition'}
+                  >
+                    {isRecording ? <MicOff size={18} /> : <Mic size={18} />}
+                  </button>
+                )}
+                {!isRecording && audioResult && (
+                  <div style={{
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: audioResult.startsWith('✓') ? 'var(--secondary)' : 'var(--accent)',
+                    textAlign: 'center',
+                    lineHeight: 1.4,
+                  }}>
+                    {audioResult}
+                  </div>
+                )}
+                {audioLoading && (
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Transcribing...</div>
+                )}
+              </div>
               <div className="flash-hint">Tap card or press Space to reveal meaning</div>
             </div>
           ) : (
@@ -203,6 +328,52 @@ export function FlashcardView() {
                 <section className="flash-answer-section mnemonic">
                   <div className="flash-label">Mnemonic</div>
                   <p>{currentWord.mnemonics}</p>
+                </section>
+              )}
+
+              {apiKey && (
+                <section className="flash-answer-section" style={{ borderStyle: 'dashed' }}>
+                  {!aiMnemonic ? (
+                    <div style={{ textAlign: 'center' }}>
+                      <button
+                        onClick={e => { e.stopPropagation(); handleMnemonic() }}
+                        disabled={mnemonicLoading}
+                        style={{
+                          background: 'none',
+                          border: '1px solid var(--primary)',
+                          borderRadius: 'var(--radius)',
+                          padding: '8px 16px',
+                          color: 'var(--primary)',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: mnemonicLoading ? 'not-allowed' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          opacity: mnemonicLoading ? 0.6 : 1,
+                        }}
+                      >
+                        <Lightbulb size={14} />
+                        {mnemonicLoading ? 'Generating...' : 'Help me remember'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flash-label" style={{ color: 'var(--primary)' }}>AI Mnemonic</div>
+                      <p style={{ fontSize: 15, lineHeight: 1.6 }}>{aiMnemonic}</p>
+                      {imagePrompt && (
+                        <div style={{ marginTop: 8, fontSize: 13, color: 'var(--text-muted)', fontStyle: 'italic', borderTop: '1px solid var(--border-light)', paddingTop: 8 }}>
+                          Image prompt: {imagePrompt}
+                        </div>
+                      )}
+                      <button
+                        onClick={e => { e.stopPropagation(); setAiMnemonic(''); setImagePrompt('') }}
+                        style={{ marginTop: 8, background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer', padding: 0 }}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  )}
                 </section>
               )}
 

@@ -1,15 +1,14 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Flag, CheckCircle, Clock, Calculator as CalcIcon, BookOpen } from 'lucide-react'
 import { questions } from '../../data/questions'
 import { vocabQuestions } from '../../data/questions_vocab'
 import { mockTests } from '../../data/mocktests'
 import { passages } from '../../data/passages'
-import { QuestionCard } from '../practice/QuestionCard'
 import { useLocalStorage } from '../../hooks/useLocalStorage'
-import { formatTime } from '../../utils/helpers'
 import { Timer } from './Timer'
-import type { MockTestResult, PracticeResult, Question } from '../../types'
+import { ETSQuestionArea } from './ETSQuestionArea'
+import { ETSNavigatorGrid } from './ETSNavigatorGrid'
+import type { MockTestResult, PracticeResult, Question, Passage } from '../../types'
 
 const allQuestions: Question[] = [...questions, ...vocabQuestions]
 
@@ -28,75 +27,579 @@ const RANDOM_CONFIGS = [
   ]},
 ]
 
+const ETS_BLUE = '#0f4b8e'
+const ETS_GREEN = '#2e7d32'
+const ETS_TEXT = '#1a1a1a'
+const ETS_MUTED = '#666666'
+const ETS_WARN = '#cc3300'
+
+function shuffleArray<T>(arr: T[]): T[] {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
 function lookupQuestions(ids: string[]): Question[] {
   const lookup = new Map(allQuestions.map(q => [q.id, q]))
   return ids.map(id => lookup.get(id)).filter((q): q is Question => q !== undefined)
 }
 
-export function MockTestView() {
+function getPassageForQuestion(q: Question): Passage | null {
+  if (!q.passageId) return null
+  return passages.find(p => p.id === q.passageId) || null
+}
+
+function getSectionInstructions(type: 'quant' | 'verbal', sectionName: string): string[] {
+  if (type === 'quant') {
+    return [
+      `Section: ${sectionName}`,
+      '20 Questions',
+      '35 Minutes',
+      'You may use a calculator for this section.',
+      'All numbers used are real numbers.',
+      'Figures are drawn as accurately as possible EXCEPT when it is stated that a figure is not drawn to scale.',
+      'Select the single best answer choice for each question unless otherwise directed.',
+    ]
+  }
+  return [
+    `Section: ${sectionName}`,
+    '20 Questions',
+    '30 Minutes',
+    'This section includes reading comprehension passages and questions about them.',
+    'For each question, select the best answer from the choices given.',
+    'Some questions will require you to select more than one answer.',
+    'Answer choices that are partially correct on multiple-select questions are considered incorrect.',
+  ]
+}
+
+function SectionInstructionsOverlay({
+  sectionName,
+  sectionType,
+  onStart,
+}: {
+  sectionName: string
+  sectionType: 'quant' | 'verbal'
+  onStart: () => void
+}) {
+  const instructions = getSectionInstructions(sectionType, sectionName)
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      background: '#fff',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000,
+      fontFamily: 'Arial, Helvetica, sans-serif',
+    }}>
+      <div style={{
+        maxWidth: 600,
+        padding: 48,
+        textAlign: 'center',
+      }}>
+        <h1 style={{
+          fontSize: 22,
+          fontWeight: 700,
+          color: '#000',
+          marginBottom: 32,
+          letterSpacing: 0.5,
+        }}>
+          GRE® General Test
+        </h1>
+        <div style={{
+          borderTop: '2px solid #000',
+          borderBottom: '2px solid #000',
+          padding: '24px 0',
+          marginBottom: 32,
+        }}>
+          <p style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: '#000' }}>
+            {sectionName}
+          </p>
+          <p style={{ fontSize: 14, color: ETS_MUTED }}>
+            {sectionType === 'quant' ? 'Quantitative Reasoning' : 'Verbal Reasoning'}
+          </p>
+        </div>
+        <ul style={{
+          textAlign: 'left',
+          fontSize: 13,
+          lineHeight: 1.8,
+          color: ETS_TEXT,
+          marginBottom: 40,
+          paddingLeft: 20,
+          listStyle: 'none',
+        }}>
+          {instructions.map((line, i) => (
+            <li key={i} style={{ marginBottom: 4, position: 'relative', paddingLeft: 16 }}>
+              <span style={{ position: 'absolute', left: 0 }}>•</span>
+              {line}
+            </li>
+          ))}
+        </ul>
+        <button
+          onClick={onStart}
+          style={{
+            padding: '12px 48px',
+            background: ETS_BLUE,
+            color: '#fff',
+            border: 'none',
+            fontSize: 15,
+            fontWeight: 600,
+            cursor: 'pointer',
+            letterSpacing: 0.5,
+          }}
+        >
+          Continue
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function SectionEndDialog({
+  answered,
+  total,
+  marked,
+  onReview,
+  onContinue,
+}: {
+  answered: number
+  total: number
+  marked: number
+  onReview: () => void
+  onContinue: () => void
+}) {
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,0.4)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000,
+      fontFamily: 'Arial, Helvetica, sans-serif',
+    }}>
+      <div style={{
+        background: '#fff',
+        padding: 32,
+        maxWidth: 440,
+        width: '90%',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+      }}>
+        <h2 style={{
+          fontSize: 18,
+          fontWeight: 700,
+          color: '#000',
+          marginBottom: 20,
+        }}>
+          End Section
+        </h2>
+        <div style={{
+          fontSize: 14,
+          color: ETS_TEXT,
+          lineHeight: 1.8,
+          marginBottom: 24,
+        }}>
+          <p style={{ marginBottom: 8 }}>
+            You have answered <strong>{answered}</strong> of <strong>{total}</strong> questions.
+          </p>
+          {marked > 0 && (
+            <p style={{ marginBottom: 8 }}>
+              <strong>{marked}</strong> question{marked !== 1 ? 's' : ''} marked for review.
+            </p>
+          )}
+          {answered < total && (
+            <p style={{ color: ETS_WARN, fontSize: 13, marginTop: 12 }}>
+              You have unanswered questions. Unanswered questions will be counted as incorrect.
+            </p>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+          <button
+            onClick={onReview}
+            style={{
+              padding: '10px 24px',
+              background: '#fff',
+              border: '1px solid #999',
+              color: ETS_TEXT,
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Review Questions
+          </button>
+          <button
+            onClick={onContinue}
+            style={{
+              padding: '10px 24px',
+              background: ETS_BLUE,
+              border: 'none',
+              color: '#fff',
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            End Section
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ResultsScreen({
+  sectionScores,
+  testConfig,
+  onRetry,
+}: {
+  sectionScores: { correct: number; total: number }[]
+  testConfig: { type: 'fixed'; data: typeof mockTests[0] } | { type: 'random'; data: typeof RANDOM_CONFIGS[0] } | null
+  onRetry: () => void
+}) {
   const navigate = useNavigate()
+  const totalCorrect = sectionScores.reduce((s, sc) => s + sc.correct, 0)
+  const totalQuestions = sectionScores.reduce((s, sc) => s + sc.total, 0)
+  const estScore = totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 340) : 0
+  const pct = totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : 0
+
+  return (
+    <div style={{
+      maxWidth: 520,
+      margin: '40px auto',
+      padding: 40,
+      fontFamily: 'Arial, Helvetica, sans-serif',
+      color: ETS_TEXT,
+    }}>
+      <h1 style={{
+        fontSize: 24,
+        fontWeight: 700,
+        color: '#000',
+        marginBottom: 8,
+        textAlign: 'center',
+      }}>
+        Practice Test Complete
+      </h1>
+      <p style={{
+        fontSize: 14,
+        color: ETS_MUTED,
+        textAlign: 'center',
+        marginBottom: 32,
+      }}>
+        Estimated GRE Score
+      </p>
+
+      <div style={{
+        textAlign: 'center',
+        marginBottom: 32,
+      }}>
+        <div style={{
+          fontSize: 56,
+          fontWeight: 700,
+          color: ETS_BLUE,
+          lineHeight: 1,
+          marginBottom: 4,
+        }}>
+          ~{estScore}
+        </div>
+        <div style={{
+          fontSize: 14,
+          color: ETS_MUTED,
+        }}>
+          out of 340
+        </div>
+        <div style={{
+          fontSize: 13,
+          color: ETS_MUTED,
+          marginTop: 4,
+        }}>
+          {totalCorrect}/{totalQuestions} correct ({pct}%)
+        </div>
+      </div>
+
+      <div style={{
+        borderTop: '1px solid #ddd',
+        paddingTop: 24,
+        marginBottom: 32,
+      }}>
+        {sectionScores.map((s, i) => {
+          const sections = testConfig?.type === 'fixed'
+            ? testConfig.data.sections
+            : RANDOM_CONFIGS[0].sections
+          const sectionPct = s.total > 0 ? Math.round((s.correct / s.total) * 100) : 0
+          return (
+            <div key={i} style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '12px 0',
+              borderBottom: '1px solid #eee',
+              fontSize: 14,
+            }}>
+              <span style={{ fontWeight: 600 }}>{sections[i]?.name || `Section ${i + 1}`}</span>
+              <span>
+                {s.correct}/{s.total}
+                <span style={{ color: ETS_MUTED, marginLeft: 8 }}>
+                  ({sectionPct}%)
+                </span>
+              </span>
+            </div>
+          )
+        })}
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+        <button
+          onClick={onRetry}
+          style={{
+            padding: '12px 24px',
+            background: '#fff',
+            border: '1px solid #999',
+            color: ETS_TEXT,
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          Try Another Test
+        </button>
+        <button
+          onClick={() => navigate('/analytics')}
+          style={{
+            padding: '12px 24px',
+            background: ETS_BLUE,
+            color: '#fff',
+            border: 'none',
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          View Analytics
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function TestSelector({
+  onSelectTest,
+}: {
+  onSelectTest: (testId: string) => void
+}) {
+  return (
+    <div style={{
+      maxWidth: 700,
+      margin: '0 auto',
+      padding: 40,
+      fontFamily: 'Arial, Helvetica, sans-serif',
+      color: ETS_TEXT,
+    }}>
+      <h1 style={{
+        fontSize: 24,
+        fontWeight: 700,
+        color: '#000',
+        marginBottom: 28,
+      }}>
+        GRE Practice Tests
+      </h1>
+
+      <div style={{ marginBottom: 36 }}>
+        <h2 style={{
+          fontSize: 13,
+          fontWeight: 700,
+          color: ETS_MUTED,
+          textTransform: 'uppercase',
+          letterSpacing: 1,
+          marginBottom: 12,
+        }}>
+          Predefined Tests
+        </h2>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {mockTests.map(test => (
+            <button
+              key={test.id}
+              onClick={() => onSelectTest(test.id)}
+              style={{
+                padding: '14px 20px',
+                border: '1px solid #ddd',
+                background: '#fff',
+                cursor: 'pointer',
+                textAlign: 'left',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                transition: 'border-color 150ms',
+                fontFamily: 'inherit',
+              }}
+              onMouseOver={e => (e.currentTarget.style.borderColor = ETS_BLUE)}
+              onMouseOut={e => (e.currentTarget.style.borderColor = '#ddd')}
+            >
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 14, color: '#000', marginBottom: 2 }}>
+                  {test.name}
+                </div>
+                <div style={{ fontSize: 12, color: ETS_MUTED }}>
+                  {test.sections.filter(s => s.type !== 'writing').length} sections · {test.totalQuestions} questions · ~{test.duration} min
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {test.sections.map((sec, i) => (
+                  <span key={i} style={{
+                    fontSize: 10,
+                    padding: '2px 6px',
+                    background: sec.type === 'quant' ? '#e8f0fe' : '#e8f5e9',
+                    color: sec.type === 'quant' ? ETS_BLUE : ETS_GREEN,
+                    fontWeight: 600,
+                  }}>
+                    {sec.type === 'quant' ? 'Q' : sec.type === 'verbal' ? 'V' : 'W'}
+                  </span>
+                ))}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h2 style={{
+          fontSize: 13,
+          fontWeight: 700,
+          color: ETS_MUTED,
+          textTransform: 'uppercase',
+          letterSpacing: 1,
+          marginBottom: 12,
+        }}>
+          Random Tests
+        </h2>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {RANDOM_CONFIGS.map(config => (
+            <button
+              key={config.id}
+              onClick={() => onSelectTest(config.id)}
+              style={{
+                padding: '14px 20px',
+                border: '1px solid #ddd',
+                background: '#fff',
+                cursor: 'pointer',
+                textAlign: 'left',
+                transition: 'border-color 150ms',
+                fontFamily: 'inherit',
+              }}
+              onMouseOver={e => (e.currentTarget.style.borderColor = ETS_BLUE)}
+              onMouseOut={e => (e.currentTarget.style.borderColor = '#ddd')}
+            >
+              <div style={{ fontWeight: 600, fontSize: 14, color: '#000', marginBottom: 2 }}>
+                {config.name}
+              </div>
+              <div style={{ fontSize: 12, color: ETS_MUTED }}>
+                {config.sections.length} section{config.sections.length > 1 ? 's' : ''} · {config.sections.reduce((s, sec) => s + sec.count, 0)} questions
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function MockTestView() {
   const [started, setStarted] = useState(false)
   const [selectedTestId, setSelectedTestId] = useState<string | null>(null)
   const [sectionIndex, setSectionIndex] = useState(0)
   const [currentQ, setCurrentQ] = useState(0)
   const [correctMap, setCorrectMap] = useState<Record<string, boolean>>({})
-  const [reachedQuestions, setReachedQuestions] = useState<Set<string>>(new Set())
   const [markedForReview, setMarkedForReview] = useState<Set<string>>(new Set())
   const [showCalculator, setShowCalculator] = useState(false)
-  const [testResults, setTestResults] = useLocalStorage<MockTestResult[]>('gre-mock-test-results', [])
+  const [, setTestResults] = useLocalStorage<MockTestResult[]>('gre-mock-test-results', [])
   const [, setPracticeResults] = useLocalStorage<PracticeResult[]>('gre-practice-results', [])
   const [completed, setCompleted] = useState(false)
   const [sectionScores, setSectionScores] = useState<{ correct: number; total: number }[]>([])
+  const [showInstructions, setShowInstructions] = useState(true)
+  const [showSectionEnd, setShowSectionEnd] = useState(false)
+  const [sectionTimerKey, setSectionTimerKey] = useState(0)
+
+  const mainRef = useRef<HTMLDivElement>(null)
 
   const testConfig = useMemo(() => {
     if (selectedTestId === null) return null
     const fixed = mockTests.find(t => t.id === selectedTestId)
-    if (fixed) {
-      return { type: 'fixed' as const, data: fixed }
-    }
+    if (fixed) return { type: 'fixed' as const, data: fixed }
     const random = RANDOM_CONFIGS.find(t => t.id === selectedTestId)
-    if (random) {
-      return { type: 'random' as const, data: random }
-    }
+    if (random) return { type: 'random' as const, data: random }
     return null
   }, [selectedTestId])
 
   const sectionQuestions = useMemo((): Question[] => {
     if (!testConfig) return []
-
     if (testConfig.type === 'fixed') {
       const sec = testConfig.data.sections[sectionIndex]
       if (!sec) return []
       return lookupQuestions(sec.questions)
     }
-
     const sec = testConfig.data.sections[sectionIndex]
     if (!sec) return []
     const pool = allQuestions.filter(q => q.type === sec.type)
-    const shuffled = [...pool].sort(() => Math.random() - 0.5)
-    return shuffled.slice(0, sec.count)
+    return shuffleArray(pool).slice(0, sec.count)
   }, [testConfig, sectionIndex])
 
   const sectionConfig = useMemo(() => {
     if (!testConfig) return null
-    if (testConfig.type === 'fixed') return testConfig.data.sections[sectionIndex]
-    return testConfig.data.sections[sectionIndex]
+    const sections = testConfig.type === 'fixed' ? testConfig.data.sections : testConfig.data.sections
+    return sections[sectionIndex] || null
   }, [testConfig, sectionIndex])
 
   const q = sectionQuestions[currentQ]
+  const currentPassage = useMemo(() => q ? getPassageForQuestion(q) : null, [q])
 
-  const currentPassage = useMemo(() => {
-    if (!q || !q.passageId) return null
-    return passages.find(p => p.id === q.passageId) || null
-  }, [q])
+  const answeredCount = useMemo(
+    () => sectionQuestions.filter(sq => correctMap[sq.id] !== undefined).length,
+    [sectionQuestions, correctMap]
+  )
+  const markedCount = markedForReview.size
+
+  const timerRunning = started && !showInstructions && !completed
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (started && !completed) {
+        e.preventDefault()
+        e.returnValue = 'You are in the middle of a practice test. Are you sure you want to leave?'
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [started, completed])
+
+  const handleStartTest = (testId: string) => {
+    setSelectedTestId(testId)
+    setStarted(true)
+    setSectionIndex(0)
+    setCurrentQ(0)
+    setCorrectMap({})
+    setMarkedForReview(new Set())
+    setSectionScores([])
+    setCompleted(false)
+    setShowInstructions(true)
+    setShowSectionEnd(false)
+    setSectionTimerKey(k => k + 1)
+  }
+
+  const handleStartSection = () => {
+    setShowInstructions(false)
+    setSectionTimerKey(k => k + 1)
+  }
 
   const handleAnswer = useCallback((_correct: boolean) => {
     if (!q) return
     setCorrectMap(prev => ({ ...prev, [q.id]: _correct }))
-    if (!reachedQuestions.has(q.id)) {
-      setReachedQuestions(prev => new Set(prev).add(q.id))
-    }
-  }, [q, reachedQuestions])
+  }, [q])
 
   const toggleMark = () => {
     if (!q) return
@@ -108,11 +611,20 @@ export function MockTestView() {
     })
   }
 
+  const clearResponse = () => {
+    if (!q) return
+    setCorrectMap(prev => {
+      const next = { ...prev }
+      delete next[q.id]
+      return next
+    })
+  }
+
   const goToQuestion = (i: number) => {
     setCurrentQ(i)
   }
 
-  const finishSection = useCallback(() => {
+  const handleSectionEnd = useCallback(() => {
     const sectionQ = sectionQuestions
     const correct = sectionQ.filter(q => correctMap[q.id] === true).length
     const newScore = { correct, total: sectionQ.length }
@@ -129,22 +641,28 @@ export function MockTestView() {
       })),
     ])
 
-    if (testConfig && sectionIndex < (testConfig.type === 'fixed' ? testConfig.data.sections.length : testConfig.data.sections.length) - 1) {
+    const totalSections = testConfig?.type === 'fixed'
+      ? testConfig.data.sections.length
+      : (testConfig?.data.sections.length || 0)
+
+    if (testConfig && sectionIndex < totalSections - 1) {
+      setShowInstructions(true)
       setSectionIndex(i => i + 1)
       setCurrentQ(0)
       setSectionScores(allScores)
-      setReachedQuestions(new Set())
+      setShowSectionEnd(false)
     } else {
       const totalCorrect = allScores.reduce((s, sc) => s + sc.correct, 0)
       const totalQuestions = allScores.reduce((s, sc) => s + sc.total, 0)
-      const estScore = Math.round((totalCorrect / totalQuestions) * 340)
+      const estScore = totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 340) : 0
 
       const result: MockTestResult = {
         testId: `mock-${Date.now()}`,
         date: new Date().toISOString(),
         scores: allScores.map((s, i) => {
-          const sections = testConfig && testConfig.type === 'fixed'
-            ? testConfig.data.sections : RANDOM_CONFIGS[0].sections
+          const sections = testConfig?.type === 'fixed'
+            ? testConfig.data.sections
+            : RANDOM_CONFIGS[0].sections
           return { section: sections[i]?.name || `Section ${i + 1}`, correct: s.correct, total: s.total }
         }),
         totalScore: estScore,
@@ -152,406 +670,559 @@ export function MockTestView() {
       }
       setTestResults(prev => [...prev, result])
       setSectionScores(allScores)
+      setShowSectionEnd(false)
       setCompleted(true)
+      setTimerRunning(false)
     }
-  }, [sectionQuestions, correctMap, sectionScores, sectionIndex, testConfig])
+  }, [sectionQuestions, correctMap, sectionScores, sectionIndex, testConfig, setPracticeResults, setTestResults])
 
   const handleTimeUp = useCallback(() => {
-    finishSection()
-  }, [finishSection])
+    handleSectionEnd()
+  }, [handleSectionEnd])
 
-  const answeredCount = Object.keys(correctMap).length
-  const markedCount = markedForReview.size
+  const openSectionEnd = () => {
+    setShowSectionEnd(true)
+  }
 
-  // ── Start Screen ──
   if (!started) {
-    return (
-      <div style={{ maxWidth: 700, margin: '0 auto', padding: 40 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 24 }}>Mock Tests</h1>
-
-        <div style={{ marginBottom: 32 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12, color: 'var(--text-secondary)' }}>Predefined Tests</h2>
-          <div style={{ display: 'grid', gap: 12 }}>
-            {mockTests.map(test => (
-              <div
-                key={test.id}
-                onClick={() => { setSelectedTestId(test.id); setStarted(true) }}
-                style={{
-                  padding: '16px 20px',
-                  border: `2px solid ${selectedTestId === test.id ? 'var(--primary)' : 'var(--border)'}`,
-                  borderRadius: 'var(--radius-lg)',
-                  cursor: 'pointer',
-                  background: selectedTestId === test.id ? 'rgba(99,102,241,0.06)' : 'var(--bg-card)',
-                  transition: 'all var(--transition)',
-                }}
-              >
-                <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{test.name}</div>
-                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                  {test.sections.filter(s => s.type !== 'writing').length} sections · {test.sections.filter(s => s.type !== 'writing').reduce((s, sec) => s + sec.questions.length, 0)} questions · ~{test.duration} min
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                  {test.sections.map((sec, i) => (
-                    <span key={i} style={{
-                      fontSize: 11,
-                      padding: '2px 8px',
-                      borderRadius: 12,
-                      background: sec.type === 'quant' ? 'rgba(26,115,232,0.1)' : sec.type === 'verbal' ? 'rgba(52,168,83,0.1)' : 'rgba(234,67,53,0.1)',
-                      color: sec.type === 'quant' ? '#1a73e8' : sec.type === 'verbal' ? '#34a853' : '#ea4335',
-                      fontWeight: 500,
-                    }}>
-                      {sec.name}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12, color: 'var(--text-secondary)' }}>Random Tests</h2>
-          <div style={{ display: 'grid', gap: 12 }}>
-            {RANDOM_CONFIGS.map(config => (
-              <div
-                key={config.id}
-                onClick={() => { setSelectedTestId(config.id); setStarted(true) }}
-                style={{
-                  padding: '16px 20px',
-                  border: '2px solid var(--border)',
-                  borderRadius: 'var(--radius-lg)',
-                  cursor: 'pointer',
-                  background: 'var(--bg-card)',
-                  transition: 'all var(--transition)',
-                }}
-              >
-                <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>{config.name}</div>
-                <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-                  {config.sections.length} section{config.sections.length > 1 ? 's' : ''} · {config.sections.reduce((s, sec) => s + sec.count, 0)} questions · ~{config.sections.reduce((s, sec) => s + Math.round(sec.duration / 60), 0)} min
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    )
+    return <TestSelector onSelectTest={handleStartTest} />
   }
 
-  // ── Completed Screen ──
   if (completed) {
-    const totalCorrect = sectionScores.reduce((s, sc) => s + sc.correct, 0)
-    const totalQuestions = sectionScores.reduce((s, sc) => s + sc.total, 0)
-    const estScore = totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 340) : 0
-    const pct = totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : 0
     return (
-      <div style={{ maxWidth: 500, margin: '0 auto', textAlign: 'center', padding: 40 }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>🎯</div>
-        <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Test Complete!</h2>
-        <div style={{ fontSize: 48, fontWeight: 700, color: 'var(--primary)', marginBottom: 4 }}>
-          ~{estScore}
-        </div>
-        <div style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>
-          Estimated GRE Score (out of 340)
-        </div>
-        <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 24 }}>
-          {totalCorrect}/{totalQuestions} correct ({pct}%)
-        </div>
-        <div style={{ display: 'grid', gap: 8, marginBottom: 24, textAlign: 'left' }}>
-          {sectionScores.map((s, i) => {
-            const sections = testConfig && testConfig.type === 'fixed'
-              ? testConfig.data.sections : RANDOM_CONFIGS[0].sections
-            return (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 16px', background: 'var(--bg-secondary)', borderRadius: 'var(--radius)' }}>
-                <span style={{ fontSize: 14 }}>{sections[i]?.name || `Section ${i + 1}`}</span>
-                <span style={{ fontSize: 14, fontWeight: 600 }}>{s.correct}/{s.total}</span>
-              </div>
-            )
-          })}
-        </div>
-        <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-          <button
-            onClick={() => { setStarted(false); setCompleted(false); setSelectedTestId(null); setSectionIndex(0); setCurrentQ(0); setCorrectMap({}); setMarkedForReview(new Set()); setSectionScores([]); setReachedQuestions(new Set()) }}
-            style={{ padding: '12px 24px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', fontSize: 14, fontWeight: 600, cursor: 'pointer', color: 'var(--text)' }}
-          >
-            Try Another Test
-          </button>
-          <button
-            onClick={() => navigate('/analytics')}
-            style={{ padding: '12px 24px', background: 'var(--primary)', color: '#fff', border: 'none', borderRadius: 'var(--radius)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
-          >
-            View Analytics
-          </button>
-        </div>
-      </div>
+      <ResultsScreen
+        sectionScores={sectionScores}
+        testConfig={testConfig}
+        onRetry={() => {
+          setStarted(false)
+          setCompleted(false)
+          setSelectedTestId(null)
+          setSectionIndex(0)
+          setCurrentQ(0)
+          setCorrectMap({})
+          setMarkedForReview(new Set())
+          setSectionScores([])
+          setShowInstructions(true)
+          setShowSectionEnd(false)
+        }}
+      />
     )
   }
 
-  if (!q || !sectionConfig) return null
+  if (showInstructions && sectionConfig) {
+    return (
+      <SectionInstructionsOverlay
+        sectionName={sectionConfig.name}
+        sectionType={'type' in sectionConfig ? (sectionConfig as { type: 'quant' | 'verbal' }).type : 'quant'}
+        onStart={handleStartSection}
+      />
+    )
+  }
 
-  // ── Test Interface ──
+  if (showSectionEnd) {
+    return (
+      <SectionEndDialog
+        answered={answeredCount}
+        total={sectionQuestions.length}
+        marked={markedCount}
+        onReview={() => setShowSectionEnd(false)}
+        onContinue={handleSectionEnd}
+      />
+    )
+  }
+
+  if (!q || !sectionConfig) {
+    const allScores = [...sectionScores, { correct: 0, total: 0 }]
+    setSectionScores(allScores)
+    return null
+  }
+
+  const isQuant = q.type === 'quant'
+  const isVerbalRC = q.subtype === 'reading_comp' && currentPassage
+  const cols = isVerbalRC ? '1fr 1fr' : '1fr'
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)' }}>
-      {/* Top Bar */}
+    <div
+      ref={mainRef}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        fontFamily: 'Arial, Helvetica, sans-serif',
+        color: ETS_TEXT,
+        background: '#fff',
+        position: 'fixed',
+        inset: 0,
+        zIndex: 500,
+      }}
+    >
+      {/* ── TOP BAR ── */}
       <div style={{
         display: 'flex',
-        justifyContent: 'space-between',
         alignItems: 'center',
-        padding: '12px 16px',
-        background: 'var(--bg-card)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius)',
-        marginBottom: 16,
-        flexWrap: 'wrap',
-        gap: 8,
+        justifyContent: 'space-between',
+        padding: '0 20px',
+        height: 50,
+        background: '#f0f0f0',
+        borderBottom: '1px solid #ccc',
+        flexShrink: 0,
       }}>
-        <div>
-          <div style={{ fontWeight: 600, fontSize: 14 }}>{sectionConfig.name}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Question {currentQ + 1} of {sectionQuestions.length}</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#000' }}>
+          {sectionConfig.name}
+          <span style={{ fontWeight: 400, color: ETS_MUTED, marginLeft: 8, fontSize: 12 }}>
+            ({q.type === 'quant' ? 'Quantitative' : 'Verbal'} Reasoning)
+          </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <Timer duration={sectionConfig.duration} running={!completed} onTimeUp={handleTimeUp} />
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Answered: {answeredCount}/{sectionQuestions.length}
-          </div>
-          {markedCount > 0 && (
-            <div style={{ fontSize: 12, color: 'var(--warning)', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Flag size={12} /> {markedCount} marked
+        <Timer
+          key={sectionTimerKey}
+          duration={(sectionConfig as { duration: number }).duration || 2100}
+          running={timerRunning}
+          onTimeUp={handleTimeUp}
+        />
+        <div style={{ fontSize: 14, fontWeight: 600, color: '#000' }}>
+          Question <span style={{ color: ETS_BLUE }}>{currentQ + 1}</span> of {sectionQuestions.length}
+        </div>
+      </div>
+
+      {/* ── MAIN CONTENT ── */}
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        overflow: 'hidden',
+      }}>
+        {/* Question Area */}
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          overflow: 'hidden',
+          padding: isVerbalRC ? 0 : 24,
+        }}>
+          {isVerbalRC && currentPassage ? (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: cols,
+              flex: 1,
+              overflow: 'hidden',
+            }}>
+              <div style={{
+                overflow: 'auto',
+                padding: 24,
+                borderRight: '1px solid #ddd',
+                background: '#fafafa',
+              }}>
+                <div style={{
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: ETS_MUTED,
+                  textTransform: 'uppercase',
+                  letterSpacing: 1,
+                  marginBottom: 16,
+                }}>
+                  Passage
+                </div>
+                <div style={{
+                  fontSize: 14,
+                  lineHeight: 1.8,
+                  color: ETS_TEXT,
+                  whiteSpace: 'pre-wrap',
+                  fontFamily: 'Georgia, "Times New Roman", serif',
+                }}>
+                  {currentPassage.content}
+                </div>
+                <div style={{
+                  marginTop: 16,
+                  fontSize: 11,
+                  color: ETS_MUTED,
+                  fontStyle: 'italic',
+                }}>
+                  Source: {currentPassage.source} · {currentPassage.wordCount} words
+                </div>
+              </div>
+              <div style={{ overflow: 'auto', padding: 24 }}>
+                <ETSQuestionArea
+                  question={q}
+                  onAnswer={handleAnswer}
+                  correctMap={correctMap}
+                />
+              </div>
             </div>
+          ) : (
+            <div style={{
+              flex: 1,
+              overflow: 'auto',
+              maxWidth: 800,
+              margin: '0 auto',
+              width: '100%',
+            }}>
+              <ETSQuestionArea
+                question={q}
+                onAnswer={handleAnswer}
+                correctMap={correctMap}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* ── NAVIGATOR SIDEBAR ── */}
+        <div style={{
+          width: 200,
+          borderLeft: '1px solid #ddd',
+          padding: 16,
+          overflowY: 'auto',
+          flexShrink: 0,
+          background: '#fafafa',
+          display: 'flex',
+          flexDirection: 'column',
+        }}>
+          <ETSNavigatorGrid
+            total={sectionQuestions.length}
+            current={currentQ}
+            correctMap={correctMap}
+            markedForReview={markedForReview}
+            sectionQuestions={sectionQuestions}
+            onGoTo={goToQuestion}
+          />
+
+          {isQuant && (
+            <button
+              onClick={() => setShowCalculator(v => !v)}
+              style={{
+                marginTop: 16,
+                padding: '8px 12px',
+                background: showCalculator ? '#e8f0fe' : '#fff',
+                border: '1px solid #999',
+                color: ETS_TEXT,
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+              }}
+            >
+              {showCalculator ? 'Hide Calculator' : 'Show Calculator'}
+            </button>
           )}
         </div>
       </div>
 
-      {/* Main Content */}
-      <div style={{ display: 'flex', gap: 16, flex: 1, overflow: 'hidden' }}>
-        {/* Left - Question Navigator */}
-        <div style={{
-          width: 200,
-          background: 'var(--bg-card)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)',
-          padding: 12,
-          overflowY: 'auto',
-          flexShrink: 0,
-        }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
-            Questions
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4 }}>
-            {sectionQuestions.map((sq, i) => {
-              const isAnswered = correctMap[sq.id] !== undefined
-              const isMarked = markedForReview.has(sq.id)
-              const isActive = i === currentQ
-              return (
-                <div
-                  key={sq.id}
-                  onClick={() => goToQuestion(i)}
-                  style={{
-                    padding: '6px 4px',
-                    textAlign: 'center',
-                    borderRadius: 4,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    background: isActive ? 'var(--primary)' : isAnswered ? 'var(--bg-secondary)' : 'transparent',
-                    color: isActive ? '#fff' : isAnswered ? 'var(--secondary)' : 'var(--text)',
-                    border: isMarked ? '2px solid var(--warning)' : '1px solid var(--border)',
-                    transition: 'all var(--transition)',
-                  }}
-                >
-                  {i + 1}
-                </div>
-              )
-            })}
-          </div>
-          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-muted)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}><div style={{ width: 10, height: 10, background: 'var(--secondary)', borderRadius: 2 }} /> Answered</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}><div style={{ width: 10, height: 10, border: '2px solid var(--warning)', borderRadius: 2 }} /> Marked</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><div style={{ width: 10, height: 10, background: 'var(--primary)', borderRadius: 2 }} /> Current</div>
-          </div>
+      {/* ── BOTTOM BAR ── */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '10px 20px',
+        borderTop: '1px solid #ccc',
+        background: '#f0f0f0',
+        flexShrink: 0,
+      }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={() => setCurrentQ(i => Math.max(0, i - 1))}
+            disabled={currentQ === 0}
+            style={{
+              padding: '8px 20px',
+              background: '#fff',
+              border: '1px solid #999',
+              color: currentQ === 0 ? '#ccc' : ETS_TEXT,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: currentQ === 0 ? 'not-allowed' : 'pointer',
+              opacity: currentQ === 0 ? 0.5 : 1,
+            }}
+          >
+            Previous
+          </button>
+          <button
+            onClick={() => setCurrentQ(i => Math.min(sectionQuestions.length - 1, i + 1))}
+            disabled={currentQ >= sectionQuestions.length - 1}
+            style={{
+              padding: '8px 20px',
+              background: ETS_BLUE,
+              border: 'none',
+              color: '#fff',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: currentQ >= sectionQuestions.length - 1 ? 'not-allowed' : 'pointer',
+              opacity: currentQ >= sectionQuestions.length - 1 ? 0.5 : 1,
+            }}
+          >
+            Next
+          </button>
         </div>
 
-        {/* Center - Question */}
-        <div style={{
-          flex: 1,
-          background: 'var(--bg-card)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)',
-          padding: 24,
-          overflowY: 'auto',
-        }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
-            {q.type} · {q.topic} · {q.difficulty}
-          </div>
-
-          {currentPassage && (
-            <div style={{
-              background: 'var(--bg-secondary)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius)',
-              padding: 20,
-              marginBottom: 16,
-              maxHeight: 300,
-              overflow: 'auto',
-            }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>
-                <BookOpen size={12} style={{ marginRight: 4 }} /> Passage · {currentPassage.source}
-              </div>
-              <div style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>
-                {currentPassage.content}
-              </div>
-            </div>
-          )}
-
-          <QuestionCard
-            key={`${sectionIndex}-${currentQ}`}
-            question={q}
-            onAnswer={handleAnswer}
-            mockMode
-          />
-        </div>
-
-        {/* Right - Tools Panel */}
-        <div style={{
-          width: 180,
-          background: 'var(--bg-card)',
-          border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)',
-          padding: 16,
-          flexShrink: 0,
-        }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>
-            Tools
-          </div>
-
+        <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={toggleMark}
             style={{
-              width: '100%',
-              padding: '10px 12px',
-              background: markedForReview.has(q.id) ? '#fffbeb' : 'var(--bg-secondary)',
-              border: `1px solid ${markedForReview.has(q.id) ? '#fde68a' : 'var(--border)'}`,
-              borderRadius: 'var(--radius)',
-              color: markedForReview.has(q.id) ? '#ca8a04' : 'var(--text)',
-              cursor: 'pointer',
+              padding: '8px 16px',
+              background: markedForReview.has(q.id) ? '#fff3cd' : '#fff',
+              border: `1px solid ${markedForReview.has(q.id) ? '#ffc107' : '#999'}`,
+              color: markedForReview.has(q.id) ? '#856404' : ETS_TEXT,
               fontSize: 13,
-              fontWeight: 500,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              marginBottom: 8,
+              fontWeight: 600,
+              cursor: 'pointer',
             }}
           >
-            <Flag size={14} /> {markedForReview.has(q.id) ? 'Marked' : 'Mark Review'}
+            {markedForReview.has(q.id) ? 'Marked for Review' : 'Mark for Review'}
           </button>
-
-          {q.type === 'quant' && (
-            <button
-              onClick={() => setShowCalculator(!showCalculator)}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius)',
-                color: 'var(--text)',
-                cursor: 'pointer',
-                fontSize: 13,
-                fontWeight: 500,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                marginBottom: 16,
-              }}
-            >
-              <CalcIcon size={14} /> Calculator
-            </button>
-          )}
-
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
-            Section Progress
-          </div>
-          <div style={{ height: 4, background: 'var(--bg-secondary)', borderRadius: 2, marginBottom: 4 }}>
-            <div style={{
-              height: '100%',
-              width: `${(answeredCount / sectionQuestions.length) * 100}%`,
-              background: 'var(--secondary)',
-              borderRadius: 2,
-              transition: 'width 0.3s',
-            }} />
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            {answeredCount}/{sectionQuestions.length}
-          </div>
+          <button
+            onClick={clearResponse}
+            style={{
+              padding: '8px 16px',
+              background: '#fff',
+              border: '1px solid #999',
+              color: ETS_TEXT,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Clear Response
+          </button>
         </div>
-      </div>
-
-      {/* Bottom Navigation */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '12px 0',
-        marginTop: 12,
-      }}>
-        <button
-          onClick={() => setCurrentQ(i => Math.max(0, i - 1))}
-          disabled={currentQ === 0}
-          style={{
-            padding: '10px 20px',
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius)',
-            color: 'var(--text)',
-            cursor: currentQ === 0 ? 'not-allowed' : 'pointer',
-            opacity: currentQ === 0 ? 0.5 : 1,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 14,
-            fontWeight: 500,
-          }}
-        >
-          <ChevronLeft size={16} /> Previous
-        </button>
 
         <button
-          onClick={finishSection}
+          onClick={openSectionEnd}
           style={{
-            padding: '10px 20px',
-            background: 'var(--bg-secondary)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius)',
-            color: 'var(--text)',
+            padding: '8px 20px',
+            background: '#fff',
+            border: '1px solid #999',
+            color: ETS_TEXT,
+            fontSize: 13,
+            fontWeight: 600,
             cursor: 'pointer',
-            fontSize: 14,
-            fontWeight: 500,
           }}
         >
           {testConfig && sectionIndex < (testConfig.type === 'fixed' ? testConfig.data.sections.length : testConfig.data.sections.length) - 1
-            ? 'Next Section →'
+            ? 'Section End'
             : 'Finish Test'}
         </button>
+      </div>
 
+      {/* ── CALCULATOR OVERLAY ── */}
+      {showCalculator && isQuant && (
+        <ETSCalculatorModal onClose={() => setShowCalculator(false)} />
+      )}
+    </div>
+  )
+}
+
+function ETSCalculatorModal({ onClose }: { onClose: () => void }) {
+  const [display, setDisplay] = useState('0')
+  const [memory, setMemory] = useState<number | null>(null)
+  const [operator, setOperator] = useState<string | null>(null)
+  const [prevValue, setPrevValue] = useState<number | null>(null)
+  const [newEntry, setNewEntry] = useState(true)
+  const [position, setPosition] = useState({ x: window.innerWidth - 340, y: 80 })
+  const [dragging, setDragging] = useState(false)
+  const dragOffset = useRef({ x: 0, y: 0 })
+
+  const handleNumber = (n: string) => {
+    if (newEntry) {
+      setDisplay(n)
+      setNewEntry(false)
+    } else {
+      setDisplay(prev => prev === '0' ? n : prev + n)
+    }
+  }
+
+  const handleOperator = (op: string) => {
+    setPrevValue(parseFloat(display))
+    setOperator(op)
+    setNewEntry(true)
+  }
+
+  const handleEquals = () => {
+    if (prevValue === null || !operator) return
+    const curr = parseFloat(display)
+    let result = 0
+    switch (operator) {
+      case '+': result = prevValue + curr; break
+      case '-': result = prevValue - curr; break
+      case '×': result = prevValue * curr; break
+      case '÷': result = curr !== 0 ? prevValue / curr : NaN; break
+    }
+    setDisplay(String(result))
+    setPrevValue(null)
+    setOperator(null)
+    setNewEntry(true)
+  }
+
+  const handleSqrt = () => {
+    const curr = parseFloat(display)
+    if (curr >= 0) {
+      setDisplay(String(Math.sqrt(curr)))
+      setNewEntry(true)
+    }
+  }
+
+  const handlePlusMinus = () => {
+    setDisplay(prev => String(-parseFloat(prev)))
+  }
+
+  const handleClear = () => {
+    setDisplay('0')
+    setPrevValue(null)
+    setOperator(null)
+    setNewEntry(true)
+  }
+
+  const handleClearEntry = () => {
+    setDisplay('0')
+    setNewEntry(true)
+  }
+
+  const handleMemoryRecall = () => {
+    if (memory !== null) {
+      setDisplay(String(memory))
+      setNewEntry(true)
+    }
+  }
+
+  const handleMemoryClear = () => setMemory(null)
+  const handleMemoryPlus = () => setMemory((memory || 0) + parseFloat(display))
+  const handleMemoryMinus = () => setMemory((memory || 0) - parseFloat(display))
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setDragging(true)
+    dragOffset.current = { x: e.clientX - position.x, y: e.clientY - position.y }
+  }
+
+  useEffect(() => {
+    if (!dragging) return
+    const handleMouseMove = (e: MouseEvent) => {
+      setPosition({ x: e.clientX - dragOffset.current.x, y: e.clientY - dragOffset.current.y })
+    }
+    const handleMouseUp = () => setDragging(false)
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [dragging])
+
+  const btnBase: React.CSSProperties = {
+    padding: 8,
+    border: '1px solid #808080',
+    background: '#fff',
+    color: '#000',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+    textAlign: 'center',
+    fontFamily: 'Arial, sans-serif',
+  }
+
+  const opBtn: React.CSSProperties = {
+    ...btnBase,
+    background: '#f0f0f0',
+  }
+
+  const memBtn: React.CSSProperties = {
+    ...btnBase,
+    fontSize: 10,
+    fontWeight: 700,
+    background: '#e8e8e8',
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        left: position.x,
+        top: position.y,
+        width: 260,
+        background: '#f5f5f5',
+        border: '2px solid #666',
+        boxShadow: '4px 4px 12px rgba(0,0,0,0.25)',
+        zIndex: 2000,
+        fontFamily: 'Arial, sans-serif',
+        userSelect: 'none',
+      }}
+    >
+      <div
+        onMouseDown={handleMouseDown}
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '6px 10px',
+          background: '#e0e0e0',
+          borderBottom: '1px solid #999',
+          cursor: 'move',
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#000' }}>Calculator</span>
         <button
-          onClick={() => setCurrentQ(i => Math.min(sectionQuestions.length - 1, i + 1))}
-          disabled={currentQ >= sectionQuestions.length - 1}
+          onClick={onClose}
           style={{
-            padding: '10px 20px',
-            background: 'var(--primary)',
+            background: 'none',
             border: 'none',
-            borderRadius: 'var(--radius)',
-            color: '#fff',
-            cursor: currentQ >= sectionQuestions.length - 1 ? 'not-allowed' : 'pointer',
-            opacity: currentQ >= sectionQuestions.length - 1 ? 0.5 : 1,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 14,
-            fontWeight: 500,
+            fontSize: 16,
+            cursor: 'pointer',
+            color: '#333',
+            fontWeight: 700,
+            lineHeight: 1,
           }}
         >
-          Next <ChevronRight size={16} />
+          ✕
         </button>
+      </div>
+
+      <div style={{ padding: 8 }}>
+        <div style={{
+          padding: '6px 8px',
+          background: '#fff',
+          border: '1px solid #999',
+          textAlign: 'right',
+          fontSize: 18,
+          fontFamily: '"Courier New", monospace',
+          fontWeight: 700,
+          marginBottom: 8,
+          minHeight: 32,
+          overflow: 'hidden',
+          color: '#000',
+        }}>
+          {display}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 3 }}>
+          <div onClick={handleMemoryClear} style={memBtn}>MC</div>
+          <div onClick={handleMemoryRecall} style={memBtn}>MR</div>
+          <div onClick={handleMemoryPlus} style={memBtn}>M+</div>
+          <div onClick={handleMemoryMinus} style={memBtn}>M−</div>
+
+          <div onClick={() => handleNumber('7')} style={btnBase}>7</div>
+          <div onClick={() => handleNumber('8')} style={btnBase}>8</div>
+          <div onClick={() => handleNumber('9')} style={btnBase}>9</div>
+          <div onClick={() => handleOperator('÷')} style={opBtn}>÷</div>
+
+          <div onClick={() => handleNumber('4')} style={btnBase}>4</div>
+          <div onClick={() => handleNumber('5')} style={btnBase}>5</div>
+          <div onClick={() => handleNumber('6')} style={btnBase}>6</div>
+          <div onClick={() => handleOperator('×')} style={opBtn}>×</div>
+
+          <div onClick={() => handleNumber('1')} style={btnBase}>1</div>
+          <div onClick={() => handleNumber('2')} style={btnBase}>2</div>
+          <div onClick={() => handleNumber('3')} style={btnBase}>3</div>
+          <div onClick={() => handleOperator('-')} style={opBtn}>−</div>
+
+          <div onClick={() => handleNumber('0')} style={btnBase}>0</div>
+          <div onClick={() => handleNumber('.')} style={btnBase}>.</div>
+          <div onClick={handlePlusMinus} style={opBtn}>±</div>
+          <div onClick={() => handleOperator('+')} style={opBtn}>+</div>
+
+          <div onClick={handleClear} style={{ ...btnBase, fontWeight: 700, color: '#c00' }}>C</div>
+          <div onClick={handleClearEntry} style={btnBase}>CE</div>
+          <div onClick={handleSqrt} style={opBtn}>√</div>
+          <div onClick={handleEquals} style={{ ...btnBase, background: ETS_BLUE, color: '#fff', fontWeight: 700 }}>=</div>
+        </div>
       </div>
     </div>
   )
 }
+
+export default MockTestView

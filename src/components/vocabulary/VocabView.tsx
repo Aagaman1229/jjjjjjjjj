@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react'
-import { Search, ChevronDown, ChevronUp, Bookmark, BookmarkCheck, BookOpen, Flame, Layers, Star, X } from 'lucide-react'
+import { Search, ChevronDown, ChevronUp, Bookmark, BookmarkCheck, BookOpen, Flame, Layers, Star, X, Gamepad2 } from 'lucide-react'
 import { vocabularyWords } from '../../data/vocabulary'
 import { useLocalStorage } from '../../hooks/useLocalStorage'
+import { getVocabGamePrompt, checkVocabGuess } from '../../utils/aiService'
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -43,6 +44,46 @@ export function VocabView() {
   const [frequency, setFrequency] = useState<string>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [bookmarked, setBookmarked] = useLocalStorage<string[]>('gre-vocab-bookmarks', [])
+  const [apiKey] = useLocalStorage<string | null>('gre-groq-key', null)
+
+  const [showGame, setShowGame] = useState(false)
+  const [gameWord, setGameWord] = useState('')
+  const [gameStory, setGameStory] = useState('')
+  const [gameGuess, setGameGuess] = useState('')
+  const [gameResult, setGameResult] = useState('')
+  const [gameLoading, setGameLoading] = useState(false)
+  const [gameChecking, setGameChecking] = useState(false)
+  const [gameError, setGameError] = useState('')
+
+  const handleGameGenerate = async () => {
+    const w = gameWord.trim()
+    if (!w || gameLoading || !apiKey) return
+    setGameLoading(true)
+    setGameResult('')
+    setGameGuess('')
+    setGameError('')
+    try {
+      const story = await getVocabGamePrompt(w, apiKey)
+      setGameStory(story)
+    } catch {
+      setGameError('Failed to generate game. Check your API key.')
+    }
+    setGameLoading(false)
+  }
+
+  const handleGameCheck = async () => {
+    const g = gameGuess.trim()
+    if (!g || gameChecking || !apiKey || !gameStory) return
+    setGameChecking(true)
+    setGameError('')
+    try {
+      const result = await checkVocabGuess(gameWord.trim(), g, gameStory, apiKey)
+      setGameResult(result)
+    } catch {
+      setGameError('Failed to check answer.')
+    }
+    setGameChecking(false)
+  }
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -132,8 +173,162 @@ export function VocabView() {
               <X size={14} /> Clear
             </button>
           )}
+          <button
+            onClick={() => { setShowGame(!showGame); setGameResult(''); setGameError('') }}
+            style={{
+              ...btnStyle,
+              background: showGame ? 'var(--primary-light)' : 'var(--bg-card)',
+              color: showGame ? 'var(--primary)' : 'var(--text)',
+              borderColor: showGame ? 'var(--primary)' : 'var(--border)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <Gamepad2 size={14} /> {showGame ? 'Close Game' : 'Context Clue Game'}
+          </button>
         </div>
       </section>
+
+      {showGame && (
+        <section style={{
+          border: '1px solid var(--primary)',
+          borderRadius: 'var(--radius-lg)',
+          padding: 20,
+          background: 'var(--bg-secondary)',
+        }}>
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12, color: 'var(--text)' }}>
+            Context Clue Game
+          </div>
+
+          {!apiKey && (
+            <div style={{ fontSize: 13, color: 'var(--accent)', marginBottom: 12 }}>
+              Set your Groq API key in the AI chat settings to play.
+            </div>
+          )}
+
+          {!gameStory ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                value={gameWord}
+                onChange={e => setGameWord(e.target.value)}
+                placeholder="Type a vocab word (e.g., garrulous)..."
+                style={{
+                  flex: 1,
+                  padding: '10px 14px',
+                  borderRadius: 'var(--radius)',
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg-card)',
+                  color: 'var(--text)',
+                  fontSize: 14,
+                  outline: 'none',
+                }}
+                onKeyDown={e => { if (e.key === 'Enter') handleGameGenerate() }}
+              />
+              <button
+                onClick={handleGameGenerate}
+                disabled={!gameWord.trim() || gameLoading || !apiKey}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: 'var(--radius)',
+                  border: 'none',
+                  background: !gameWord.trim() || !apiKey ? 'var(--border)' : 'var(--primary)',
+                  color: !gameWord.trim() || !apiKey ? 'var(--text-muted)' : '#fff',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: !gameWord.trim() || !apiKey ? 'not-allowed' : 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {gameLoading ? 'Generating...' : 'Generate Game'}
+              </button>
+            </div>
+          ) : (
+            <div>
+              <div style={{
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius)',
+                padding: '14px 18px',
+                fontSize: 15,
+                lineHeight: 1.7,
+                color: 'var(--text)',
+                marginBottom: 12,
+              }}>
+                {gameStory}
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <input
+                  value={gameGuess}
+                  onChange={e => setGameGuess(e.target.value)}
+                  placeholder="Guess the missing word..."
+                  style={{
+                    flex: 1,
+                    padding: '10px 14px',
+                    borderRadius: 'var(--radius)',
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg-card)',
+                    color: 'var(--text)',
+                    fontSize: 14,
+                    outline: 'none',
+                  }}
+                  onKeyDown={e => { if (e.key === 'Enter') handleGameCheck() }}
+                />
+                <button
+                  onClick={handleGameCheck}
+                  disabled={!gameGuess.trim() || gameChecking}
+                  style={{
+                    padding: '10px 20px',
+                    borderRadius: 'var(--radius)',
+                    border: 'none',
+                    background: !gameGuess.trim() ? 'var(--border)' : 'var(--secondary)',
+                    color: !gameGuess.trim() ? 'var(--text-muted)' : '#fff',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: !gameGuess.trim() ? 'not-allowed' : 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {gameChecking ? 'Checking...' : 'Check'}
+                </button>
+              </div>
+
+              {gameResult && (
+                <div style={{
+                  padding: '10px 14px',
+                  borderRadius: 'var(--radius)',
+                  background: gameResult.startsWith('correct') ? 'rgba(52,168,83,0.12)' : 'rgba(234,67,53,0.1)',
+                  color: gameResult.startsWith('correct') ? 'var(--secondary)' : 'var(--accent)',
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                }}>
+                  {gameResult}
+                </div>
+              )}
+
+              {gameError && (
+                <div style={{ fontSize: 13, color: 'var(--accent)', marginTop: 8 }}>{gameError}</div>
+              )}
+
+              <button
+                onClick={() => { setGameStory(''); setGameResult(''); setGameGuess(''); setGameError('') }}
+                style={{
+                  marginTop: 8,
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--primary)',
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                Try another word
+              </button>
+            </div>
+          )}
+        </section>
+      )}
 
       <div className="vocab-result-row">
         <span>{filtered.length} words shown</span>

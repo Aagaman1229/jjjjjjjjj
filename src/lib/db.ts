@@ -164,3 +164,38 @@ export async function getChatHistory(userId: string) {
     .order('created_at', { ascending: true })
   return (data || []).map(m => ({ role: m.role as 'user' | 'assistant' | 'system', content: m.content }))
 }
+
+// ─── User API Keys ──────────────────────────────────────────
+
+export async function saveApiKey(userId: string, provider: string, apiKey: string) {
+  const existing = await supabase
+    .from('user_api_keys')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('provider', provider)
+    .maybeSingle()
+
+  if (existing.data) {
+    return supabase
+      .from('user_api_keys')
+      .update({ api_key: apiKey, updated_at: new Date().toISOString() })
+      .eq('id', existing.data.id)
+  }
+
+  return supabase.from('user_api_keys').insert({
+    user_id: userId,
+    provider,
+    api_key: apiKey,
+  })
+}
+
+export async function getApiKey(userId: string, provider: string): Promise<string | null> {
+  const { data } = await supabase
+    .from('user_api_keys')
+    .select('api_key')
+    .eq('user_id', userId)
+    .eq('provider', provider)
+    .maybeSingle()
+
+  return data?.api_key ?? null
+}

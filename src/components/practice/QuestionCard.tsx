@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import type { Question } from '../../types'
 import { GeometryFigure } from './GeometryFigure'
+import { triggerSocraticTutor } from '../common/AiChat'
 
 interface QuestionCardProps {
   question: Question
@@ -379,7 +380,34 @@ export function QuestionCard({ question, onAnswer, showExplanation = true, mockM
         {question.stem}
       </div>
 
-      {question.choices && (
+      {question.subtype === 'qc' ? (
+        <div>
+          {[
+            'Quantity A is greater',
+            'Quantity B is greater',
+            'The two quantities are equal',
+            'The relationship cannot be determined from the information given',
+          ].map((text, i) => {
+            const label = letters[i]
+            const isAnswer = label === question.answer
+            return (
+              <div
+                key={i}
+                onClick={() => handleSelect(label)}
+                style={optionStyle(selected === label, revealed && !mockMode, isAnswer)}
+              >
+                <input
+                  type="radio"
+                  checked={selected === label}
+                  readOnly
+                  style={{ accentColor: 'var(--primary)', marginTop: 2 }}
+                />
+                <span><strong>{label}.</strong> {text}</span>
+              </div>
+            )
+          })}
+        </div>
+      ) : question.choices && (
         <div>
           {question.choices.map((choice, i) => {
             const label = letters[i]
@@ -418,6 +446,27 @@ export function QuestionCard({ question, onAnswer, showExplanation = true, mockM
           <div style={{ fontSize: 14, lineHeight: 1.8, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>
             {question.explanation || 'No explanation available.'}
           </div>
+          {correct === false && (
+            <button
+              onClick={() => triggerSocraticTutor(question.stem, selected || '', question.answer)}
+              style={{
+                marginTop: 12,
+                padding: '8px 18px',
+                borderRadius: 'var(--radius)',
+                border: '1px solid var(--primary)',
+                background: 'var(--primary-light)',
+                color: 'var(--primary)',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              Socratic Tutor
+            </button>
+          )}
         </div>
       )}
     </div>
